@@ -3081,7 +3081,7 @@ public class Thread implements Runnable {
      * @param lt a Lifetime
      * @return Previous lifetime
      */
-    public Lifetime unsafeSetLifetime(Lifetime lt) {
+    Lifetime unsafeSetLifetime(Lifetime lt) {
         if (Lifetime.version == Lifetime.Version.V1) {
             var old = this.lifetime;
             this.lifetime = lt;
