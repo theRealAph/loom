@@ -61,10 +61,22 @@ class UnboundedExecutor extends AbstractExecutorService {
     private final ReentrantLock terminationLock = new ReentrantLock();
     private final Condition terminationCondition = terminationLock.newCondition();
 
-    UnboundedExecutor(ThreadFactory factory) {
-        this.factory = Objects.requireNonNull(factory);
+    private final Lifetime lifetime;
+
+    public UnboundedExecutor(ThreadFactory factory) {
+        Objects.requireNonNull(factory);
+        this.lifetime = Lifetime.start();
+        this.factory = task -> {
+            Thread t = factory.newThread(task);
+            t.unsafeSetLifetime(lifetime);
+            return t;
+        };
     }
 
+    public void close() {
+        super.close(); // waits for all threads to terminate
+        lifetime.close();
+    }
     /**
      * Sets the state to TERMINATED if there are no remaining threads.
      */

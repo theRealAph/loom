@@ -35,6 +35,7 @@ public final class ScopedBinding
     implements AutoCloseable {
 
     final Scoped<?> referent;
+    final Lifetime lifetime;
 
     final Object prev;
 
@@ -48,11 +49,12 @@ public final class ScopedBinding
      * @param t TBD
      * @param prev TBD
      */
-    ScopedBinding(Scoped<?> v, Object t, Object prev) {
+    ScopedBinding(Scoped<?> v, Object t, Object prev, Lifetime lifetime) {
         if (t != null && !v.getType().isInstance(t))
             throw new ClassCastException(cannotBindMsg(t, v.getType()));
-        referent = v;
+        this.lifetime = lifetime;
         this.prev = prev;
+        this.referent = v;
     }
 
     /**
@@ -60,5 +62,6 @@ public final class ScopedBinding
      */
     public final void close() {
         referent.release(prev);
+        lifetime.close();
     }
 }
