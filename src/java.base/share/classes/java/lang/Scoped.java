@@ -44,6 +44,7 @@ import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.security.ProtectionDomain;
+import java.util.Arrays;
 import java.util.concurrent.Callable;
 import java.util.function.Supplier;
 
@@ -318,7 +319,7 @@ public abstract class Scoped<T> {
     }
 
     static class Cache {
-        static final boolean CACHE_LIFETIMES = true;
+        static final boolean CACHE_LIFETIMES = false;
 
         static final int INDEX_BITS = SCOPED_CACHE_SHIFT;
 
@@ -352,6 +353,33 @@ public abstract class Scoped<T> {
                 objects[n] = objects[n + 1] = null;
             }
         }
+
+        // An alternative cache for lifetimes which uses two fields in Thread
+        // instead of utilizing the scoped cache. Looks like it should work
+        // well but performs spectacularly badly on a buffer copying test.
+
+        // static boolean isActive(Lifetime lt) {
+        //     if (! CACHE_LIFETIMES)  return false;
+        //     Thread t = Thread.currentCarrierThread();
+        //     return (t.lt0 == lt || t.lt1 == lt);
+        // }
+
+        // static void setActive(Lifetime lt) {
+        //     if (! CACHE_LIFETIMES)  return;
+        //     Thread t = Thread.currentCarrierThread();
+        //     int slot = TABLE_SIZE + (chooseVictim(t) & 1);
+        //     if (slot == 0) {
+        //         t.lt0 = lt;
+        //     } else {
+        //         t.lt1 = lt;
+        //     }
+        // }
+
+        // static void clearActive() {
+        //     if (! CACHE_LIFETIMES)  return;
+        //     Thread t = Thread.currentCarrierThread();
+        //     t.lt0 = t.lt1 = null;
+        // }
 
         static Object[] createCache() {
             Object[] objects = new Object[TABLE_SIZE * 2 + 2];
@@ -440,7 +468,17 @@ public abstract class Scoped<T> {
             thread.victims = (tmp << 31) | (tmp >>> 1);
             return tmp & TABLE_MASK;
         }
+
+        static void clearCache() {
+            // We need to do this when we yield a Continuation.
+            if (! USE_CACHE) return;
+            Object[] objects = Thread.scopedCache();
+            if (objects != null) {
+                Arrays.fill(objects, null);
+            }
+        }
     }
+
 
 }
 
