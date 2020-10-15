@@ -282,6 +282,26 @@ public class Thread implements Runnable {
     @IntrinsicCandidate
     static native void setScopedCache(Object[] cache);
 
+    // A simple (not very) random string of bits to use when evicting
+    // cache entries.
+    int victims
+        = 0b1100_1001_0000_1111_1101_1010_1010_0010;
+
+    private ScopedMap scopedMap;
+
+    final ScopedMap scopedMap() {
+        if (this.scopedMap == null) {
+            this.scopedMap = new ScopedMap();
+        }
+        return this.scopedMap;
+    }
+
+    final ScopedMap scopedMapOrNull () {
+        return this.scopedMap;
+    }
+
+    // end Scoped support
+
     /**
      * A hint to the scheduler that the current thread is willing to yield
      * its current use of a processor. The scheduler is free to ignore this
@@ -3055,6 +3075,96 @@ public class Thread implements Runnable {
         while((ref = queue.poll()) != null) {
             map.remove(ref);
         }
+    }
+
+    Thread parentThread;
+    Lifetime lifetime; // the current innermost lifetime (or null)
+    int depth;
+    int parentDepth;
+
+    /**
+     * TBD
+     *
+     * @return Lifetime
+     */
+    public Lifetime currentLifetime() {
+        return lifetime;
+    }
+
+    /**
+     * TBD
+     *
+     * @param lt a Lifetime
+     */
+    Lifetime pushLifetime() {
+        assert this == Thread.currentThread();
+        var newDepth = ++depth;
+        return new Lifetime(this, newDepth);
+    }
+
+    /**
+     * TBD
+     *
+     * @param lt a Lifetime
+     */
+    public void popLifetime(Lifetime lt) {
+        assert lt.thread == this;
+        if (this != Thread.currentThread()) throw new LifetimeError();
+        if (lt.depth() != this.depth) throw new LifetimeError();
+        assert depth > parentDepth;
+        depth--;
+        Scoped.Cache.clearActive();
+    }
+
+    /**
+     * TBD
+     *
+     * @param lt a Lifetime
+     * @return Previous lifetime
+     */
+    Lifetime unsafeSetLifetime(Lifetime lt) {
+        assert (!isAlive() && lt.thread == Thread.currentThread())
+            || this == Thread.currentThread(); // this ensures that depth does not concurrently change here
+        assert depth == parentDepth;
+
+        var old = new Lifetime(parentThread, parentDepth);
+        this.parentThread = lt.thread;
+        this.parentDepth = lt.depth();
+        this.depth = parentDepth;
+        this.lifetime = lt;
+        return old;
+    }
+
+    boolean isActive(Lifetime lt) {
+        assert this == Thread.currentThread();
+
+        // the thread that closes the lifetime must be the thread that owns it
+        // and the thread that sets this thread's parent must be that thread
+        // so either we're on the right thread and we'll see depth = MAX_VALUE due to mem ordering,
+        // or we're on a wrong thread, in which case the parent search will fail; either way, this will fail.
+        if (lt.thread == this) {
+            boolean result = lt.depth() <= this.depth;
+            if (Scoped.Cache.CACHE_LIFETIMES) {
+                if (result) {
+                    Scoped.Cache.setActive(lt);
+                }
+            }
+            return result;
+        }
+        for (Thread t = this; t != null; t = t.parentThread) {
+            if (Scoped.Cache.CACHE_LIFETIMES) {
+                if (lt.thread == t.parentThread) {
+                    boolean result = lt.depth() <= t.parentDepth;
+                    if (result) {
+                        Scoped.Cache.setActive(lt);
+                    }
+                    return result;
+                }
+            } else {
+                if (lt.thread == t.parentThread) return lt.depth() <= t.parentDepth;
+            }
+        }
+        return false;
     }
 
     /**
