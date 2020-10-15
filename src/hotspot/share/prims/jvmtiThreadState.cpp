@@ -204,7 +204,7 @@ JvmtiVTMTDisabler::disable_VTMT() {
 
   _VTMT_disable_count++;
 
-  // block while some transitions are in progress
+  // Block while some mount/unmount transitions are in progress.
   while (_VTMT_count > 0) {
     ml.wait();
   }
@@ -225,12 +225,13 @@ JvmtiVTMTDisabler::enable_VTMT() {
 
 void
 JvmtiVTMTDisabler::start_VTMT(jthread vthread, int callsite_tag) {
+  if (!JvmtiExport::can_support_virtual_threads()) {
+    return;
+  }
   JavaThread* thread = JavaThread::current();
-  assert(JvmtiExport::can_support_virtual_threads(),
-         "check_and_self_suspend_vthread sanity check");
-
   HandleMark hm(thread);
   Handle vth = Handle(thread, JNIHandles::resolve_external_guard(vthread));
+
   ThreadBlockInVM tbivm(thread);
   MonitorLocker ml(JvmtiVTMT_lock, Mutex::_no_safepoint_check_flag);
 
@@ -245,12 +246,14 @@ JvmtiVTMTDisabler::start_VTMT(jthread vthread, int callsite_tag) {
 
 void
 JvmtiVTMTDisabler::finish_VTMT(jthread vthread, int callsite_tag) {
+  if (!JvmtiExport::can_support_virtual_threads()) {
+    return;
+  }
   JavaThread* thread = JavaThread::current();
-  assert(JvmtiExport::can_support_virtual_threads(),
-         "check_and_self_suspend_vthread sanity check");
-
   MonitorLocker ml(JvmtiVTMT_lock, Mutex::_no_safepoint_check_flag);
+
   _VTMT_count--;
+
   // unblock waiting VTMT disablers
   if (_VTMT_disable_count > 0) {
     ml.notify_all();
@@ -258,9 +261,7 @@ JvmtiVTMTDisabler::finish_VTMT(jthread vthread, int callsite_tag) {
   if (callsite_tag == 1) { // finish_VTMT for a vthread unmount
     if (thread->is_cthread_pending_suspend()) {
       thread->clear_cthread_pending_suspend();
-      // Safe to do without grabbing SR_lock as the thread is current.
       // The JavaThread* will be suspended upon return to Java.
-      MonitorLocker ml(thread->SR_lock(), Mutex::_no_safepoint_check_flag);
       thread->set_external_suspend();
     }
   }
@@ -282,12 +283,16 @@ VThreadList::contains(oop vt) const {
   return idx != -1;
 }
 
+static OopHandle NULLHandle = OopHandle(NULL);
+
 void
 VThreadList::append(oop vt) {
   assert(!contains(vt), "VThreadList::append sanity check");
-  // TMP: to work around OopHandle copy constructor assert
-  static OopHandle NULLHandle = OopHandle(NULL);
+
+  // This is to work around assert in OopHandle copy constructor.
   GrowableArrayCHeap<OopHandle, mtServiceability>::append(NULLHandle);
+  pop();
+
   GrowableArrayCHeap<OopHandle, mtServiceability>::append(OopHandle(Universe::vm_global(), vt));
 }
 
@@ -296,15 +301,21 @@ VThreadList::remove(oop vt) {
   int idx = find(vt);
   assert(idx != -1, "VThreadList::remove sanity check");
   at(idx).release(Universe::vm_global());
-  remove_at(idx);
+
+  // To work around assert in OopHandle copy constructor do not use remove_at().
+  for (int i = idx + 1; i < length(); i++) {
+    at_put(i - 1, NULLHandle); // work around assert in OopHandle copy constructor
+    at_put(i - 1, at(i));
+  }
+  pop();
 }
 
 void
 VThreadList::invalidate() {
   for (int idx = length() - 1; idx >= 0; idx--) {
     at(idx).release(Universe::vm_global());
-    remove_at(idx);
   }
+  clear();
 }
 
 /* Virtual Threads Suspend/Resume management */
@@ -417,35 +428,27 @@ void JvmtiThreadState::leave_interp_only_mode() {
 
 
 // Helper routine used in several places
-int JvmtiThreadState::count_frames(bool split_carrier_virtual_frames) {
+int JvmtiThreadState::count_frames() {
 #ifdef ASSERT
   Thread *current_thread = Thread::current();
 #endif
-  assert(current_thread == get_thread() ||
-         SafepointSynchronize::is_at_safepoint() ||
-         current_thread == get_thread()->active_handshaker(),
+  assert(SafepointSynchronize::is_at_safepoint() ||
+         get_thread()->is_handshake_safe_for(current_thread),
          "call by myself / at safepoint / at handshake");
 
   if (!get_thread()->has_last_Java_frame()) return 0;  // no Java frames
 
   ResourceMark rm;
   RegisterMap reg_map(get_thread(), true, true);
-  javaVFrame *jvf = split_carrier_virtual_frames == true
-          ? JvmtiEnvBase::get_last_java_vframe(get_thread(), &reg_map)
-          : get_thread()->last_java_vframe(&reg_map);
-  int n = 0;
-  while (jvf != NULL) {
-    jvf = jvf->java_sender();
-    n++;
-  }
-  return n;
+  javaVFrame *jvf = get_thread()->last_java_vframe(&reg_map);
+
+  return (int)JvmtiEnvBase::get_frame_count(jvf);
 }
 
 
 void JvmtiThreadState::invalidate_cur_stack_depth() {
   assert(SafepointSynchronize::is_at_safepoint() ||
-         JavaThread::current() == get_thread() ||
-         Thread::current() == get_thread()->active_handshaker(),
+         get_thread()->is_handshake_safe_for(Thread::current()),
          "bad synchronization with owner thread");
 
   _cur_stack_depth = UNKNOWN_STACK_DEPTH;
@@ -462,7 +465,7 @@ void JvmtiThreadState::incr_cur_stack_depth() {
 #ifdef ASSERT
     // heavy weight assert
     // fixme: remove this before merging loom with main jdk repo
-    jint num_frames = count_frames(false);
+    jint num_frames = count_frames();
     assert(_cur_stack_depth == num_frames, "cur_stack_depth out of sync _cur_stack_depth: %d num_frames: %d", _cur_stack_depth, num_frames);
 #endif
   }
@@ -478,7 +481,7 @@ void JvmtiThreadState::decr_cur_stack_depth() {
 #ifdef ASSERT
     // heavy weight assert
     // fixme: remove this before merging loom with main jdk repo
-    jint num_frames = count_frames(false);
+    jint num_frames = count_frames();
     assert(_cur_stack_depth == num_frames, "cur_stack_depth out of sync _cur_stack_depth: %d num_frames: %d", _cur_stack_depth, num_frames);
 #endif
     --_cur_stack_depth;
@@ -487,16 +490,16 @@ void JvmtiThreadState::decr_cur_stack_depth() {
 }
 
 int JvmtiThreadState::cur_stack_depth() {
-  JavaThread *current = JavaThread::current();
-  guarantee(current == get_thread() || current == get_thread()->active_handshaker(),
+  Thread *current = Thread::current();
+  guarantee(get_thread()->is_handshake_safe_for(current),
             "must be current thread or direct handshake");
 
   if (!is_interp_only_mode() || _cur_stack_depth == UNKNOWN_STACK_DEPTH) {
-    _cur_stack_depth = count_frames(false);
+    _cur_stack_depth = count_frames();
   } else {
 #ifdef ASSERT
     // heavy weight assert
-    jint num_frames = count_frames(false);
+    jint num_frames = count_frames();
     assert(_cur_stack_depth == num_frames, "cur_stack_depth out of sync _cur_stack_depth: %d num_frames: %d", _cur_stack_depth, num_frames);
 #endif
   }

@@ -655,7 +655,7 @@ JvmtiEnvBase::get_thread_state(oop thread_oop, JavaThread* jt) {
     // We have a JavaThread* so add more state bits.
     JavaThreadState jts = jt->thread_state();
 
-    if (cthread_with_mounted_vthread(jt) && jt->is_cthread_pending_suspend()) {
+    if (jt->is_cthread_pending_suspend()) {
       // Suspended carrier thread with a mounted virtual thread.
       state |= JVMTI_THREAD_STATE_SUSPENDED;
     }
@@ -791,14 +791,13 @@ JvmtiEnvBase::count_locked_objects(JavaThread *java_thread, Handle hobj) {
 
 jvmtiError
 JvmtiEnvBase::get_current_contended_monitor(JavaThread *calling_thread, JavaThread *java_thread, jobject *monitor_ptr) {
-  JavaThread *current_jt = JavaThread::current();
+  JavaThread *current_thread = JavaThread::current();
 /* The HandshakeState::process_self_inner() does not set the_active_handshaker
  * as needed, so the assert below is temporarily disabled.
  * Enable it after the issue in HandshakeState::process_self_inner() is fixed.
  */
-  // assert(current_jt == java_thread ||
-  //        current_jt == java_thread->active_handshaker(),
-  //        "call by myself or at direct handshake");
+  // assert(java_thread->is_handshake_safe_for(current_thread),
+  //         "call by myself or at handshake");
   oop obj = NULL;
   // The ObjectMonitor* can't be async deflated since we are either
   // at a safepoint or the calling thread is operating on itself so
@@ -822,8 +821,8 @@ JvmtiEnvBase::get_current_contended_monitor(JavaThread *calling_thread, JavaThre
   if (obj == NULL) {
     *monitor_ptr = NULL;
   } else {
-    HandleMark hm(current_jt);
-    Handle     hobj(current_jt, obj);
+    HandleMark hm(current_thread);
+    Handle     hobj(current_thread, obj);
     *monitor_ptr = jni_reference(calling_thread, hobj);
   }
   return JVMTI_ERROR_NONE;
@@ -832,15 +831,19 @@ JvmtiEnvBase::get_current_contended_monitor(JavaThread *calling_thread, JavaThre
 jvmtiError
 JvmtiEnvBase::get_owned_monitors(JavaThread *calling_thread, JavaThread* java_thread,
                                  GrowableArray<jvmtiMonitorStackDepthInfo*> *owned_monitors_list) {
+  // Note:
+  // calling_thread is the thread that requested the list of monitors for java_thread.
+  // java_thread is the thread owning the monitors.
+  // current_thread is the thread executing this code, can be a non-JavaThread (e.g. VM Thread).
+  // And they all may be different threads.
   jvmtiError err = JVMTI_ERROR_NONE;
-  JavaThread *current_jt = JavaThread::current();
-  assert(current_jt == java_thread ||
-         current_jt == java_thread->active_handshaker(),
-         "call by myself or at direct handshake");
+  Thread *current_thread = Thread::current();
+  assert(java_thread->is_handshake_safe_for(current_thread),
+         "call by myself or at handshake");
 
   if (java_thread->has_last_Java_frame()) {
-    ResourceMark rm(current_jt);
-    HandleMark   hm(current_jt);
+    ResourceMark rm(current_thread);
+    HandleMark   hm(current_thread);
     RegisterMap  reg_map(java_thread);
 
     int depth = 0;
@@ -991,7 +994,7 @@ jvmtiError
 JvmtiEnvBase::get_stack_trace(javaVFrame *jvf,
                               jint start_depth, jint max_count,
                               jvmtiFrameInfo* frame_buffer, jint* count_ptr) {
-  Thread* current_thread = Thread::current();
+  Thread *current_thread = Thread::current();
   ResourceMark rm(current_thread);
   HandleMark hm(current_thread);
   int count = 0;
@@ -1057,9 +1060,8 @@ JvmtiEnvBase::get_stack_trace(JavaThread *java_thread,
   uint32_t debug_bits = 0;
 #endif
   Thread *current_thread = Thread::current();
-  assert(current_thread == java_thread ||
-         SafepointSynchronize::is_at_safepoint() ||
-         current_thread == java_thread->active_handshaker(),
+  assert(SafepointSynchronize::is_at_safepoint() ||
+         java_thread->is_handshake_safe_for(current_thread),
          "call by myself / at safepoint / at handshake");
   int count = 0;
   jvmtiError err = JVMTI_ERROR_NONE;
@@ -1080,20 +1082,8 @@ JvmtiEnvBase::get_stack_trace(JavaThread *java_thread,
   return err;
 }
 
-jvmtiError
-JvmtiEnvBase::get_frame_count(JvmtiThreadState *state, jint *count_ptr) {
-  assert((state != NULL),
-         "JavaThread should create JvmtiThreadState before calling this method");
-  *count_ptr = state->count_frames();
-  return JVMTI_ERROR_NONE;
-}
-
-jvmtiError
-JvmtiEnvBase::get_frame_count(oop vthread_oop, jint *count_ptr) {
-  Thread* cur_thread = Thread::current();
-  ResourceMark rm(cur_thread);
-  HandleMark hm(cur_thread);
-  javaVFrame *jvf = JvmtiEnvBase::get_vthread_jvf(vthread_oop);
+jint
+JvmtiEnvBase::get_frame_count(javaVFrame *jvf) {
   int count = 0;
 
   while (jvf != NULL) {
@@ -1101,20 +1091,45 @@ JvmtiEnvBase::get_frame_count(oop vthread_oop, jint *count_ptr) {
     jvf = jvf->java_sender();
     count++;
   }
-  *count_ptr = count;
+  return count;
+}
+
+jvmtiError
+JvmtiEnvBase::get_frame_count(JavaThread* jt, jint *count_ptr) {
+  Thread *current_thread = Thread::current();
+  assert(current_thread == jt ||
+         SafepointSynchronize::is_at_safepoint() ||
+         jt->is_handshake_safe_for(current_thread),
+         "call by myself / at safepoint / at handshake");
+
+  if (!jt->has_last_Java_frame()) { // no Java frames
+    *count_ptr = 0;
+  } else {
+    ResourceMark rm(current_thread);
+    RegisterMap reg_map(jt, true, true);
+    javaVFrame *jvf = JvmtiEnvBase::get_last_java_vframe(jt, &reg_map);
+
+    *count_ptr = get_frame_count(jvf);
+  }
+  return JVMTI_ERROR_NONE;
+}
+
+jvmtiError
+JvmtiEnvBase::get_frame_count(oop vthread_oop, jint *count_ptr) {
+  Thread *current_thread = Thread::current();
+  ResourceMark rm(current_thread);
+  javaVFrame *jvf = JvmtiEnvBase::get_vthread_jvf(vthread_oop);
+
+  *count_ptr = get_frame_count(jvf);
   return JVMTI_ERROR_NONE;
 }
 
 jvmtiError
 JvmtiEnvBase::get_frame_location(JavaThread *java_thread, jint depth,
                                  jmethodID* method_ptr, jlocation* location_ptr) {
-#ifdef ASSERT
-  uint32_t debug_bits = 0;
-#endif
   Thread* current_thread = Thread::current();
-  assert(current_thread == java_thread ||
-         current_thread == java_thread->active_handshaker(),
-         "call by myself or at direct handshake");
+  assert(java_thread->is_handshake_safe_for(current_thread),
+         "call by myself or at handshake");
   ResourceMark rm(current_thread);
 
   vframe *vf = vframeFor(java_thread, depth);
@@ -1221,6 +1236,14 @@ JvmtiEnvBase::get_threadOop_and_JavaThread(ThreadsList* t_list, jthread thread,
       // thread_oop and return JVMTI_ERROR_INVALID_THREAD which we ignore here.
       if (thread_oop == NULL || err != JVMTI_ERROR_INVALID_THREAD) {
         return err;
+      }
+    }
+    if (java_thread == NULL && JvmtiExport::can_support_virtual_threads() &&
+        java_lang_VirtualThread::is_instance(thread_oop)) {
+      oop cont = java_lang_VirtualThread::continuation(thread_oop);
+      if (java_lang_Continuation::is_mounted(cont)) {
+        oop carrier_thread = java_lang_VirtualThread::carrier_thread(thread_oop);
+        java_thread = java_lang_Thread::thread(carrier_thread);
       }
     }
   }
@@ -1403,7 +1426,6 @@ JvmtiEnvBase::suspend_thread(oop thread_oop, JavaThread* java_thread, bool singl
       return JVMTI_ERROR_MUST_POSSESS_CAPABILITY;
     }
     if (single_suspend) {
-      assert(java_thread == NULL, "suspend_thread: java_thread must be NULL");
       bool vthread_ext_suspended = JvmtiVTSuspender::vthread_is_ext_suspended(thread_oop);
       if (vthread_ext_suspended) {
         return JVMTI_ERROR_THREAD_SUSPENDED;
@@ -1433,11 +1455,10 @@ JvmtiEnvBase::suspend_thread(oop thread_oop, JavaThread* java_thread, bool singl
     oop mounted_vt = java_thread->mounted_vthread();
 
     if (single_suspend && JvmtiExport::can_support_virtual_threads() &&
+        !java_lang_VirtualThread::is_instance(thread_oop) &&
         mounted_vt != NULL && thread_oop != mounted_vt) {
       // A case of a carrier thread executing a mounted virtual thread.
-      assert(!java_lang_VirtualThread::is_instance(thread_oop) &&
-             java_lang_VirtualThread::is_instance(mounted_vt),
-             "sanity check");
+      assert(java_lang_VirtualThread::is_instance(mounted_vt), "sanity check");
       if (java_thread->is_cthread_pending_suspend()) {
         return JVMTI_ERROR_THREAD_SUSPENDED;
       }
@@ -1482,7 +1503,6 @@ JvmtiEnvBase::resume_thread(oop thread_oop, JavaThread* java_thread, bool single
       return JVMTI_ERROR_MUST_POSSESS_CAPABILITY;
     }
     if (single_suspend) {
-      assert(java_thread == NULL, "resume_thread: java_thread must be NULL");
       bool vthread_ext_suspended = JvmtiVTSuspender::vthread_is_ext_suspended(thread_oop);
       if (!vthread_ext_suspended) {
         return JVMTI_ERROR_THREAD_NOT_SUSPENDED;
@@ -1507,20 +1527,10 @@ JvmtiEnvBase::resume_thread(oop thread_oop, JavaThread* java_thread, bool single
   if (java_thread->is_hidden_from_external_view()) {
     return JVMTI_ERROR_NONE;
   }
-
-  oop mounted_vt = java_thread->mounted_vthread();
-  if (single_suspend && JvmtiExport::can_support_virtual_threads() &&
-      mounted_vt != NULL && thread_oop != java_thread->mounted_vthread()) {
-    // A case of a carrier thread executing a mounted virtual thread.
-    assert(!java_lang_VirtualThread::is_instance(thread_oop) &&
-           java_lang_VirtualThread::is_instance(mounted_vt),
-           "sanity check");
-    if (java_thread->is_cthread_pending_suspend()) {
-      java_thread->clear_cthread_pending_suspend();
-      return JVMTI_ERROR_NONE;
-    } else {
-      return JVMTI_ERROR_THREAD_NOT_SUSPENDED;
-    }
+  // A case of a carrier thread executing a mounted virtual thread.
+  if (java_thread->is_cthread_pending_suspend()) {
+    java_thread->clear_cthread_pending_suspend();
+    return JVMTI_ERROR_NONE;
   }
   if (!java_thread->is_being_ext_suspended()) {
     return JVMTI_ERROR_THREAD_NOT_SUSPENDED;
@@ -1587,10 +1597,10 @@ void
 MultipleStackTracesCollector::fill_frames(jthread jt, JavaThread *thr, oop thread_oop) {
 #ifdef ASSERT
   Thread *current_thread = Thread::current();
-  assert(current_thread == thr ||
-         SafepointSynchronize::is_at_safepoint() ||
-         current_thread == thr->active_handshaker(),
-         "call by myself / at safepoint / at handshake");
+  assert(SafepointSynchronize::is_at_safepoint() ||
+         thr == NULL ||
+         thr->is_handshake_safe_for(current_thread),
+         "unmounted virtual thread / call by myself / at safepoint / at handshake");
 #endif
 
   jint state = 0;
@@ -1616,7 +1626,7 @@ MultipleStackTracesCollector::fill_frames(jthread jt, JavaThread *thr, oop threa
     }
   } else {
     state = JvmtiEnvBase::get_thread_state(thread_oop, thr);
-    if (thr != NULL && (infop->state & JVMTI_THREAD_STATE_ALIVE) != 0) {
+    if (thr != NULL && (state & JVMTI_THREAD_STATE_ALIVE) != 0) {
       infop->frame_buffer = NEW_RESOURCE_ARRAY(jvmtiFrameInfo, max_frame_count());
       _result = env()->get_stack_trace(thr, 0, max_frame_count(),
                                        infop->frame_buffer, &(infop->frame_count));
@@ -1735,7 +1745,7 @@ VM_GetAllStackTraces::doit() {
 // HandleMark must be defined in the caller only.
 // It is to keep a ret_ob_h handle alive after return to the caller.
 jvmtiError
-JvmtiEnvBase::check_top_frame(JavaThread* current_thread, JavaThread* java_thread,
+JvmtiEnvBase::check_top_frame(Thread* current_thread, JavaThread* java_thread,
                               jvalue value, TosState tos, Handle* ret_ob_h) {
   ResourceMark rm(current_thread);
 
@@ -1798,7 +1808,7 @@ JvmtiEnvBase::check_top_frame(JavaThread* current_thread, JavaThread* java_threa
 
 jvmtiError
 JvmtiEnvBase::force_early_return(JavaThread* java_thread, jvalue value, TosState tos) {
-  JavaThread* current_thread = JavaThread::current();
+  Thread* current_thread = Thread::current();
   HandleMark   hm(current_thread);
   uint32_t debug_bits = 0;
 
@@ -1992,10 +2002,10 @@ GetStackTraceClosure::do_thread(Thread *target) {
 
 void
 GetFrameCountClosure::do_thread(Thread *target) {
-  JavaThread* jt = _state->get_thread();
+  JavaThread* jt = target->as_Java_thread();
   assert(target == jt, "just checking");
   if (!jt->is_exiting() && jt->threadObj() != NULL) {
-    _result = ((JvmtiEnvBase*)_env)->get_frame_count(_state, _count_ptr);
+    _result = ((JvmtiEnvBase*)_env)->get_frame_count(jt, _count_ptr);
   }
 }
 

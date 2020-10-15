@@ -883,7 +883,7 @@ JvmtiEnv::GetCarrierThread(jthread vthread, jthread* thread_ptr) {
     return JVMTI_ERROR_INVALID_THREAD;
   }
   VThreadGetThreadClosure op(Handle(current_thread, vthread_obj), thread_ptr);
-  Handshake::execute_direct(&op, current_thread);
+  Handshake::execute(&op, current_thread);
   return op.result();
 } /* end GetCarrierThread */
 
@@ -1310,8 +1310,8 @@ JvmtiEnv::GetOwnedMonitorInfo(jthread thread, jint* owned_monitor_count_ptr, job
     VThreadGetOwnedMonitorInfoClosure op(this,
                                          Handle(calling_thread, thread_oop),
                                          owned_monitors_list);
-    bool executed = Handshake::execute_direct(&op, calling_thread);
-    err = executed ? op.result() : JVMTI_ERROR_THREAD_NOT_ALIVE;
+    Handshake::execute(&op, calling_thread);
+    err = op.result();
   } else {
     // Support for ordinary threads
     ThreadsListHandle tlh(calling_thread);
@@ -1329,8 +1329,8 @@ JvmtiEnv::GetOwnedMonitorInfo(jthread thread, jint* owned_monitor_count_ptr, job
     } else {
       // get owned monitors info with handshake
       GetOwnedMonitorInfoClosure op(calling_thread, this, owned_monitors_list);
-      bool executed = Handshake::execute_direct(&op, java_thread);
-      err = executed ? op.result() : JVMTI_ERROR_THREAD_NOT_ALIVE;
+      Handshake::execute(&op, java_thread);
+      err = op.result();
     }
   }
 
@@ -1388,8 +1388,8 @@ JvmtiEnv::GetOwnedMonitorStackDepthInfo(jthread thread, jint* monitor_info_count
     VThreadGetOwnedMonitorInfoClosure op(this,
                                          Handle(calling_thread, thread_oop),
                                          owned_monitors_list);
-    bool executed = Handshake::execute_direct(&op, calling_thread);
-    err = executed ? op.result() : JVMTI_ERROR_THREAD_NOT_ALIVE;
+    Handshake::execute(&op, calling_thread);
+    err = op.result();
   } else {
     // Support for ordinary threads
     ThreadsListHandle tlh(calling_thread);
@@ -1407,8 +1407,8 @@ JvmtiEnv::GetOwnedMonitorStackDepthInfo(jthread thread, jint* monitor_info_count
     } else {
       // get owned monitors info with handshake
       GetOwnedMonitorInfoClosure op(calling_thread, this, owned_monitors_list);
-      bool executed = Handshake::execute_direct(&op, java_thread);
-      err = executed ? op.result() : JVMTI_ERROR_THREAD_NOT_ALIVE;
+      Handshake::execute(&op, java_thread);
+      err = op.result();
     }
   }
   jint owned_monitor_count = owned_monitors_list->length();
@@ -1463,8 +1463,8 @@ JvmtiEnv::GetCurrentContendedMonitor(jthread thread, jobject* monitor_ptr) {
     VThreadGetCurrentContendedMonitorClosure op(this,
                                                 Handle(calling_thread, thread_oop),
                                                 monitor_ptr);
-    bool executed = Handshake::execute_direct(&op, calling_thread);
-    err = executed ? op.result() : JVMTI_ERROR_THREAD_NOT_ALIVE;
+    Handshake::execute(&op, calling_thread);
+    err = op.result();
     return err;
   }
   // Support for ordinary threads
@@ -1488,8 +1488,8 @@ JvmtiEnv::GetCurrentContendedMonitor(jthread thread, jobject* monitor_ptr) {
   } else {
     // get contended monitor information with handshake
     GetCurrentContendedMonitorClosure op(calling_thread, this, monitor_ptr);
-    bool executed = Handshake::execute_direct(&op, java_thread);
-    err = executed ? op.result() : JVMTI_ERROR_THREAD_NOT_ALIVE;
+    Handshake::execute(&op, java_thread);
+    err = op.result();
   }
   return err;
 } /* end GetCurrentContendedMonitor */
@@ -1672,32 +1672,31 @@ JvmtiEnv::GetStackTrace(jthread thread, jint start_depth, jint max_frame_count, 
   JavaThread* java_thread = NULL;
   JavaThread* current_thread = JavaThread::current();
   HandleMark hm(current_thread);
-  oop thread_obj = JNIHandles::resolve_external_guard(thread);
+  oop thread_obj = NULL;
 
-  // TBD: Use current thread in vthread case as well.
-  if (thread == NULL) {
-    java_thread = current_thread;
-    thread_obj = get_vthread_or_thread_oop(java_thread);
-    if (thread_obj == NULL || !thread_obj->is_a(SystemDictionary::Thread_klass())) {
-      return JVMTI_ERROR_INVALID_THREAD;
-    }
+  JvmtiVTMTDisabler vtmt_disabler;
+  ThreadsListHandle tlh(current_thread);
+
+  err = get_threadOop_and_JavaThread(tlh.list(), thread, &java_thread, &thread_obj);
+  if (err != JVMTI_ERROR_NONE) {
+    return err;
   }
+
   // Support for virtual threads
   if (java_lang_VirtualThread::is_instance(thread_obj)) {
     if (!JvmtiExport::can_support_virtual_threads()) {
       return JVMTI_ERROR_MUST_POSSESS_CAPABILITY;
     }
+    if (java_thread == NULL) { // target virtual thread is unmounted
+      ResourceMark rm(current_thread);
+      javaVFrame *jvf = JvmtiEnvBase::get_vthread_jvf(thread_obj);
+      err = get_stack_trace(jvf, start_depth, max_frame_count, frame_buffer, count_ptr);
+      return err;
+    }
     VThreadGetStackTraceClosure op(this, Handle(current_thread, thread_obj),
                                    start_depth, max_frame_count, frame_buffer, count_ptr);
-    Handshake::execute_direct(&op, current_thread);
+    Handshake::execute(&op, java_thread);
     return op.result();
-  }
-
-  // Support for ordinary threads
-  ThreadsListHandle tlh(current_thread);
-  err = get_JavaThread(tlh.list(), thread, &java_thread);
-  if (err != JVMTI_ERROR_NONE) {
-    return err;
   }
 
   // It is only safe to perform the direct operation on the current
@@ -1707,8 +1706,8 @@ JvmtiEnv::GetStackTrace(jthread thread, jint start_depth, jint max_frame_count, 
   } else {
     // Get stack trace with handshake.
     GetStackTraceClosure op(this, start_depth, max_frame_count, frame_buffer, count_ptr);
-    bool executed = Handshake::execute_direct(&op, java_thread);
-    err = executed ? op.result() : JVMTI_ERROR_THREAD_NOT_ALIVE;
+    Handshake::execute(&op, java_thread);
+    err = op.result();
   }
 
   return err;
@@ -1742,18 +1741,37 @@ JvmtiEnv::GetThreadListStackTraces(jint thread_count, const jthread* thread_list
   jvmtiError err = JVMTI_ERROR_NONE;
 
   if (thread_count == 1) {
+    JvmtiVTMTDisabler vtmt_disabler;
+
     // Use direct handshake if we need to get only one stack trace.
     JavaThread *current_thread = JavaThread::current();
     ThreadsListHandle tlh(current_thread);
+    jthread thread = thread_list[0];
     JavaThread *java_thread;
-    err = JvmtiExport::cv_external_thread_to_JavaThread(tlh.list(), *thread_list, &java_thread, NULL);
+    oop thread_obj = NULL;
+    err = get_threadOop_and_JavaThread(tlh.list(), thread, &java_thread, &thread_obj);
     if (err != JVMTI_ERROR_NONE) {
       return err;
     }
 
-    GetSingleStackTraceClosure op(this, current_thread, *thread_list, max_frame_count);
-    bool executed = Handshake::execute_direct(&op, java_thread);
-    err = executed ? op.result() : JVMTI_ERROR_THREAD_NOT_ALIVE;
+    // Support for virtual threads
+    if (java_lang_VirtualThread::is_instance(thread_obj)) {
+      if (!JvmtiExport::can_support_virtual_threads()) {
+        return JVMTI_ERROR_MUST_POSSESS_CAPABILITY;
+      }
+      if (java_thread == NULL) { // target virtual thread is unmounted
+        ResourceMark rm(current_thread);
+        MultipleStackTracesCollector collector(this, max_frame_count);
+        collector.fill_frames(thread, java_thread, thread_obj);
+        collector.allocate_and_fill_stacks(1);
+        *stack_info_ptr = collector.stack_info();
+        return collector.result();
+      }
+    }
+
+    GetSingleStackTraceClosure op(this, current_thread, thread, max_frame_count);
+    Handshake::execute(&op, java_thread);
+    err = op.result();
     if (err == JVMTI_ERROR_NONE) {
       *stack_info_ptr = op.stack_info();
     }
@@ -1779,15 +1797,14 @@ JvmtiEnv::GetFrameCount(jthread thread, jint* count_ptr) {
   JavaThread* java_thread = NULL;
   JavaThread* current_thread = JavaThread::current();
   HandleMark hm(current_thread);
-  oop thread_obj = JNIHandles::resolve_external_guard(thread);
+  oop thread_obj = NULL;
 
-  // TBD: Use current thread in vthread case as well.
-  if (thread == NULL) {
-    java_thread = current_thread;
-    thread_obj = get_vthread_or_thread_oop(java_thread);
-    if (thread_obj == NULL || !thread_obj->is_a(SystemDictionary::Thread_klass())) {
-      return JVMTI_ERROR_INVALID_THREAD;
-    }
+  JvmtiVTMTDisabler vtmt_disabler;
+  ThreadsListHandle tlh(current_thread);
+
+  err = get_threadOop_and_JavaThread(tlh.list(), thread, &java_thread, &thread_obj);
+  if (err != JVMTI_ERROR_NONE) {
+    return err;
   }
 
   // Support for virtual threads
@@ -1795,33 +1812,24 @@ JvmtiEnv::GetFrameCount(jthread thread, jint* count_ptr) {
     if (!JvmtiExport::can_support_virtual_threads()) {
       return JVMTI_ERROR_MUST_POSSESS_CAPABILITY;
     }
+    if (java_thread == NULL) { // target virtual thread is unmounted
+      err = get_frame_count(thread_obj, count_ptr);
+      return err;
+    }
     VThreadGetFrameCountClosure op(this, Handle(current_thread, thread_obj), count_ptr);
-    Handshake::execute_direct(&op, current_thread);
+    Handshake::execute(&op, java_thread);
     return op.result();
-  }
-
-  // Support for ordinary threads
-  ThreadsListHandle tlh(current_thread);
-  err = get_JavaThread(tlh.list(), thread, &java_thread);
-  if (err != JVMTI_ERROR_NONE) {
-    return err;
-  }
-
-  // retrieve or create JvmtiThreadState.
-  JvmtiThreadState* state = JvmtiThreadState::state_for(java_thread);
-  if (state == NULL) {
-    return JVMTI_ERROR_THREAD_NOT_ALIVE;
   }
 
   // It is only safe to perform the direct operation on the current
   // thread. All other usage needs to use a direct handshake for safety.
   if (java_thread == JavaThread::current()) {
-    err = get_frame_count(state, count_ptr);
+    err = get_frame_count(java_thread, count_ptr);
   } else {
     // get java stack frame count with handshake.
-    GetFrameCountClosure op(this, state, count_ptr);
-    bool executed = Handshake::execute_direct(&op, java_thread);
-    err = executed ? op.result() : JVMTI_ERROR_THREAD_NOT_ALIVE;
+    GetFrameCountClosure op(this, count_ptr);
+    Handshake::execute(&op, java_thread);
+    err = op.result();
   }
   return err;
 } /* end GetFrameCount */
@@ -1918,10 +1926,9 @@ JvmtiEnv::PopFrame(JavaThread* java_thread) {
         state->update_for_pop_top_frame();
       } else {
         UpdateForPopTopFrameClosure op(state);
-        bool executed = Handshake::execute_direct(&op, java_thread);
-        jvmtiError err = executed ? op.result() : JVMTI_ERROR_THREAD_NOT_ALIVE;
-        if (err != JVMTI_ERROR_NONE) {
-          return err;
+        Handshake::execute(&op, java_thread);
+        if (op.result() != JVMTI_ERROR_NONE) {
+          return op.result();
         }
       }
     }
@@ -1947,15 +1954,14 @@ JvmtiEnv::GetFrameLocation(jthread thread, jint depth, jmethodID* method_ptr, jl
   JavaThread* java_thread = NULL;
   JavaThread* current_thread = JavaThread::current();
   HandleMark hm(current_thread);
-  oop thread_obj = JNIHandles::resolve_external_guard(thread);
+  oop thread_obj = NULL;
 
-  // TBD: Use current thread in vthread case as well.
-  if (thread == NULL) {
-    java_thread = current_thread;
-    thread_obj = get_vthread_or_thread_oop(java_thread);
-    if (thread_obj == NULL || !thread_obj->is_a(SystemDictionary::Thread_klass())) {
-      return JVMTI_ERROR_INVALID_THREAD;
-    }
+  JvmtiVTMTDisabler vtmt_disabler;
+  ThreadsListHandle tlh(current_thread);
+
+  err = get_threadOop_and_JavaThread(tlh.list(), thread, &java_thread, &thread_obj);
+  if (err != JVMTI_ERROR_NONE) {
+    return err;
   }
 
   // Support for virtual threads
@@ -1963,17 +1969,14 @@ JvmtiEnv::GetFrameLocation(jthread thread, jint depth, jmethodID* method_ptr, jl
     if (!JvmtiExport::can_support_virtual_threads()) {
       return JVMTI_ERROR_MUST_POSSESS_CAPABILITY;
     }
+    if (java_thread == NULL) { // target virtual thread is unmounted
+      err = get_frame_location(thread_obj, depth, method_ptr, location_ptr);
+      return err;
+    }
     VThreadGetFrameLocationClosure op(this, Handle(current_thread, thread_obj),
                                       depth, method_ptr, location_ptr);
-    Handshake::execute_direct(&op, current_thread);
+    Handshake::execute(&op, java_thread);
     return op.result();
-  }
-
-  // Support for ordinary threads
-  ThreadsListHandle tlh(current_thread);
-  err = get_JavaThread(tlh.list(), thread, &java_thread);
-  if (err != JVMTI_ERROR_NONE) {
-    return err;
   }
 
   // It is only safe to perform the direct operation on the current
@@ -1983,8 +1986,8 @@ JvmtiEnv::GetFrameLocation(jthread thread, jint depth, jmethodID* method_ptr, jl
   } else {
     // JVMTI get java stack frame location via direct handshake.
     GetFrameLocationClosure op(this, depth, method_ptr, location_ptr);
-    bool executed = Handshake::execute_direct(&op, java_thread);
-    err = executed ? op.result() : JVMTI_ERROR_THREAD_NOT_ALIVE;
+    Handshake::execute(&op, java_thread);
+    err = op.result();
   }
   return err;
 } /* end GetFrameLocation */
@@ -2028,12 +2031,12 @@ JvmtiEnv::NotifyFramePop(JavaThread* java_thread, jint depth) {
   // thread. All other usage needs to use a vm-safepoint-op for safety.
   MutexLocker mu(JvmtiThreadState_lock);
   if (java_thread == JavaThread::current()) {
-    int frame_number = state->count_frames(false) - depth;
+    int frame_number = state->count_frames() - depth;
     state->env_thread_state(this)->set_frame_pop(frame_number);
   } else {
     SetFramePopClosure op(this, state, depth);
-    bool executed = Handshake::execute_direct(&op, java_thread);
-    err = executed ? op.result() : JVMTI_ERROR_THREAD_NOT_ALIVE;
+    Handshake::execute(&op, java_thread);
+    err = op.result();
   }
   return err;
 } /* end NotifyFramePop */
