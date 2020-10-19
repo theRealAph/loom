@@ -27,6 +27,7 @@ package java.lang;
 
 import jdk.internal.vm.annotation.ForceInline;
 import jdk.internal.vm.annotation.Stable;
+import java.util.function.Supplier;
 
 import static java.lang.ScopedMap.NULL_PLACEHOLDER;
 
@@ -79,6 +80,18 @@ public class LightweightThreadLocal<T> extends ThreadLocal<T> {
         return key.slowGet(Thread.currentThread());
     }
 
+    /**
+     * Returns the value in the current thread's copy of this
+     * thread-local variable.  If the variable has no value for the
+     * current thread, it is first initialized to the value returned
+     * by an invocation of the {@link #initialValue} method.
+     * If the current thread does not support thread locals then
+     * this method returns its {@link #initialValue} (or {@code null}
+     * if the {@code initialValue} method is not overridden).
+     *
+     * @return the current thread's value of this thread-local
+     * @see Thread.Builder#disallowThreadLocals()
+     */
     @Override
     @SuppressWarnings("unchecked")  // one map has entries for all types <T>
     public T get() {
@@ -97,9 +110,7 @@ public class LightweightThreadLocal<T> extends ThreadLocal<T> {
      * @since 1.5
      */
     public void remove() {
-    var map = Thread.currentThread().scopedMap();
-        map.remove(hashCode(), this);
-        ScopedCache.remove(this);
+        throw new UnsupportedOperationException();
     }
 
     @SuppressWarnings("unchecked")  // one map has entries for all types <T>
@@ -124,22 +135,36 @@ public class LightweightThreadLocal<T> extends ThreadLocal<T> {
     }
 
     /**
-     * TBD
+     * Creates a thread local variable. The initial value of the variable is
+     * determined by invoking the {@code get} method on the {@code Supplier}.
      *
-     * @param t     TBD
-     * @param chain TBD
-     * @return TBD
+     * @param <S> the type of the thread local's value
+     * @param supplier the supplier to be used to determine the initial value
+     * @return a new thread local variable
+     * @throws NullPointerException if the specified supplier is null
+     * @since 1.8
+     */
+    public static <S> ThreadLocal<S> withInitial(Supplier<? extends S> supplier) {
+        throw new UnsupportedOperationException();
+    }
+
+    /**
+     * Sets the current thread's copy of this thread-local variable
+     * to the specified value.  Most subclasses will have no need to
+     * override this method, relying solely on the {@link #initialValue}
+     * method to set the values of thread-locals.
+     *
+     * @param value the value to be stored in the current thread's copy of
+     *        this thread-local.
+     *
+     * @throws UnsupportedOperationException if the current thread does not
+     *         support thread locals
+     *
+     * @see Thread.Builder#disallowThreadLocals()
      */
     @Override
-    @SuppressWarnings(value = {"unchecked", "rawtypes"})
-    // one map has entries for all types <T>
-    public void set(T t) {
-        if (t != null && ! theType.isInstance(t))
-            throw new ClassCastException(ScopedBinding.cannotBindMsg(t, theType));
-        var map = Thread.currentThread().scopedMap();
-        map.put(hashCode(), this, t);
-
-        ScopedCache.update(this, t);
+    public void set(T value) {
+        throw new UnsupportedOperationException();
     }
 
     /**

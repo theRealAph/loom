@@ -29,6 +29,7 @@ import java.lang.ref.WeakReference;
 import java.util.Objects;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
+import static java.lang.ScopedMap.NULL_PLACEHOLDER;
 
 import jdk.internal.misc.TerminatingThreadLocal;
 
@@ -370,7 +371,7 @@ public class ThreadLocal<T> {
         Binding binding
             = new Binding(this, (e != null
                                  ? e.value
-                                 : ScopedMap.NULL_PLACEHOLDER));
+                                 : NULL_PLACEHOLDER));
         set(t);
         return binding;
     }
@@ -400,10 +401,9 @@ public class ThreadLocal<T> {
             if (Thread.currentThread() != this.thread) {
                 throw new LifetimeError();
             }
-            if (referent == ScopedMap.NULL_PLACEHOLDER) {
+            if (referent == NULL_PLACEHOLDER) {
                 referent.remove();
             } else {
-                // ((ThreadLocal<?>)referent).set(prev);
                 ThreadLocalMap map = getMap(Thread.currentThread());
                 if (map != null && map != ThreadLocalMap.NOT_SUPPORTED) {
                     map.set(referent, prev);
