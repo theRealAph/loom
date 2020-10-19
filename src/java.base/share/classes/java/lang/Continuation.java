@@ -433,6 +433,7 @@ public class Continuation {
 
     private boolean yield0(ContinuationScope scope, Continuation child) {
         if (TRACE) System.out.println(this + " yielding on scope " + scope + ". child: " + child);
+        ScopedCache.clearCache();
         if (scope != this.scope)
             this.yieldInfo = scope;
         int res = doYield(0);

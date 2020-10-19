@@ -281,6 +281,29 @@ public class ThreadLocal<T> {
      }
 
     /**
+     * TBD
+     *
+     * @param t     TBD
+     * @param chain TBD
+     * @return TBD
+     */
+    @SuppressWarnings(value = {"unchecked", "rawtypes"})
+    // one map has entries for all types <T>
+    public ScopedBinding bind(T t) {
+        if (t != null && ! theType.isInstance(t))
+            throw new ClassCastException(ScopedBinding.cannotBindMsg(t, theType));
+        var lifetime = Lifetime.start();
+        var map = Thread.currentThread().scopedMap();
+        Object previousMapping = map.put(hashCode(), this, t);
+
+        var b = new ScopedBinding(this, t, previousMapping, lifetime);
+
+        ScopedCache.update(this, t);
+
+        return b;
+    }
+
+    /**
      * Get the map associated with a ThreadLocal. Overridden in
      * InheritableThreadLocal.
      *
@@ -340,6 +363,66 @@ public class ThreadLocal<T> {
         @Override
         protected T initialValue() {
             return supplier.get();
+        }
+    }
+
+
+    /**
+     * TBD
+     *
+     * @param <T>   TBD
+     * @param klass TBD
+     * @return TBD
+     */
+    public static <T> LightweightThreadLocal<T> forType(Class<T> klass) {
+        return new LightweightThreadLocal<T>(klass);
+    }
+
+    /**
+     * TBD
+     *
+     * @param t     TBD
+     * @param chain TBD
+     * @return TBD
+     */
+    @SuppressWarnings(value = {"unchecked", "rawtypes"})
+    // one map has entries for all types <T>
+    public AutoCloseable bind(T t) {
+        Thread thread = Thread.currentThread();
+        ThreadLocalMap map = getMap(thread);
+        ThreadLocalMap.Entry e = map ? map.getEntry(this) : null;
+        ScopedBinding binding
+            = new ScopedBinding(t, e ? e.getValue() : ScopedMap.NULL_PLACEHOLDER);
+        set(t);
+        return binding;
+    }
+
+    static class ScopedBinding
+        implements AutoCloseable {
+
+        final Object referent;
+        final Object prev;
+
+        /**
+         * TBD
+         * @param v TBD
+         * @param t TBD
+         * @param prev TBD
+         */
+        ScopedBinding(ThreadLocal<?> v, Object prev) {
+            this.prev = prev;
+            this.referent = v;
+        }
+
+        /**
+         * TBD
+         */
+        public final void close() {
+            if (referent == ScopedMap.NULL_PLACEHOLDER) {
+                remove();
+            } else {
+                set(prev);
+            }
         }
     }
 
