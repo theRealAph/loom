@@ -281,29 +281,6 @@ public class ThreadLocal<T> {
      }
 
     /**
-     * TBD
-     *
-     * @param t     TBD
-     * @param chain TBD
-     * @return TBD
-     */
-    @SuppressWarnings(value = {"unchecked", "rawtypes"})
-    // one map has entries for all types <T>
-    public ScopedBinding bind(T t) {
-        if (t != null && ! theType.isInstance(t))
-            throw new ClassCastException(ScopedBinding.cannotBindMsg(t, theType));
-        var lifetime = Lifetime.start();
-        var map = Thread.currentThread().scopedMap();
-        Object previousMapping = map.put(hashCode(), this, t);
-
-        var b = new ScopedBinding(this, t, previousMapping, lifetime);
-
-        ScopedCache.update(this, t);
-
-        return b;
-    }
-
-    /**
      * Get the map associated with a ThreadLocal. Overridden in
      * InheritableThreadLocal.
      *
@@ -382,7 +359,6 @@ public class ThreadLocal<T> {
      * TBD
      *
      * @param t     TBD
-     * @param chain TBD
      * @return TBD
      */
     @SuppressWarnings(value = {"unchecked", "rawtypes"})
@@ -390,18 +366,20 @@ public class ThreadLocal<T> {
     public AutoCloseable bind(T t) {
         Thread thread = Thread.currentThread();
         ThreadLocalMap map = getMap(thread);
-        ThreadLocalMap.Entry e = map ? map.getEntry(this) : null;
-        ScopedBinding binding
-            = new ScopedBinding(t, e ? e.getValue() : ScopedMap.NULL_PLACEHOLDER);
+        ThreadLocalMap.Entry e = map != null ? map.getEntry(this) : null;
+        Binding binding
+            = new Binding(this, (e != null
+                                 ? e.value
+                                 : ScopedMap.NULL_PLACEHOLDER));
         set(t);
         return binding;
     }
 
-    static class ScopedBinding
-        implements AutoCloseable {
+    class Binding implements AutoCloseable {
 
-        final Object referent;
-        final Object prev;
+        final ThreadLocal<?> referent;
+        final Object prev;    // Should this be a WeakReference?
+        final Thread thread;
 
         /**
          * TBD
@@ -409,19 +387,27 @@ public class ThreadLocal<T> {
          * @param t TBD
          * @param prev TBD
          */
-        ScopedBinding(ThreadLocal<?> v, Object prev) {
+        Binding(ThreadLocal<?> v, Object prev) {
             this.prev = prev;
             this.referent = v;
+            this.thread = Thread.currentThread();
         }
 
         /**
          * TBD
          */
         public final void close() {
+            if (Thread.currentThread() != this.thread) {
+                throw new LifetimeError();
+            }
             if (referent == ScopedMap.NULL_PLACEHOLDER) {
-                remove();
+                referent.remove();
             } else {
-                set(prev);
+                // ((ThreadLocal<?>)referent).set(prev);
+                ThreadLocalMap map = getMap(Thread.currentThread());
+                if (map != null && map != ThreadLocalMap.NOT_SUPPORTED) {
+                    map.set(referent, prev);
+                }
             }
         }
     }

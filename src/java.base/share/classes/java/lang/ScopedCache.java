@@ -47,41 +47,11 @@ import java.util.Arrays;
 
 class ScopedCache {
 
-    static final boolean CACHE_LIFETIMES =
-        "true".equals(GetPropertyAction.privilegedGetProperty("java.lang.Lifetime.USE_CACHE"));
-
     static final int INDEX_BITS = SCOPED_CACHE_SHIFT;
 
     static final int TABLE_SIZE = 1 << INDEX_BITS;
 
     static final int TABLE_MASK = TABLE_SIZE - 1;
-
-    static boolean isActive(Lifetime lt) {
-        if (! CACHE_LIFETIMES)  return false;
-        Object[] objects = Thread.scopedCache();
-        if (objects == null)  return false;
-        int n = TABLE_SIZE;
-        return (objects[n] == lt || objects[n+1] == lt);
-    }
-
-    static void setActive(Lifetime lt) {
-        if (! CACHE_LIFETIMES)  return;
-        Object[] objects = Thread.scopedCache();
-        if (objects == null) {
-            objects = createCache();
-        }
-        int slot = TABLE_SIZE + (chooseVictim(Thread.currentCarrierThread()) & 1);
-        objects[slot] = lt;
-    }
-
-    static void clearActive() {
-        if (! CACHE_LIFETIMES)  return;
-        Object[] objects = Thread.scopedCache();
-        if (objects != null) {
-            int n = TABLE_SIZE;
-            objects[n] = objects[n + 1] = null;
-        }
-    }
 
     static Object[] createCache() {
         Object[] objects = new Object[TABLE_SIZE * 2 + 2];

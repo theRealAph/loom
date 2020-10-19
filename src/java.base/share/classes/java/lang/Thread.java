@@ -3113,7 +3113,6 @@ public class Thread implements Runnable {
         if (lt.depth() != this.depth) throw new LifetimeError();
         assert depth > parentDepth;
         depth--;
-        ScopedCache.clearActive();
     }
 
     /**
@@ -3144,24 +3143,11 @@ public class Thread implements Runnable {
         // or we're on a wrong thread, in which case the parent search will fail; either way, this will fail.
         if (lt.thread == this) {
             boolean result = lt.depth() <= this.depth;
-            if (ScopedCache.CACHE_LIFETIMES) {
-                if (result) {
-                    ScopedCache.setActive(lt);
-                }
-            }
             return result;
         }
         for (Thread t = this; t != null; t = t.parentThread) {
-            if (ScopedCache.CACHE_LIFETIMES) {
-                if (lt.thread == t.parentThread) {
-                    boolean result = lt.depth() <= t.parentDepth;
-                    if (result) {
-                        ScopedCache.setActive(lt);
-                    }
-                    return result;
-                }
-            } else {
-                if (lt.thread == t.parentThread) return lt.depth() <= t.parentDepth;
+            if (lt.thread == t.parentThread) {
+                return lt.depth() <= t.parentDepth;
             }
         }
         return false;
