@@ -115,8 +115,6 @@ public class LightweightThreadLocal<T> extends ThreadLocal<T> {
 
     @SuppressWarnings("unchecked")  // one map has entries for all types <T>
     private T slowGet(Thread thread) {
-        Lifetime currentLifetime = thread.currentLifetime();
-
         var value = NULL_PLACEHOLDER;
 
         for (var t = thread; t != null; t = t.parentThread) {
@@ -177,7 +175,7 @@ public class LightweightThreadLocal<T> extends ThreadLocal<T> {
     @Override
     @SuppressWarnings(value = {"unchecked", "rawtypes"})
     // one map has entries for all types <T>
-    public ScopedBinding bind(T t) {
+    public ThreadLocalBinding bind(T t) {
         if (t != null && ! theType.isInstance(t))
             throw new ClassCastException(ScopedBinding.cannotBindMsg(t, theType));
         var lifetime = Lifetime.start();

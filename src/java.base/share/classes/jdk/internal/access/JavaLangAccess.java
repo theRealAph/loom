@@ -397,4 +397,12 @@ public interface JavaLangAccess {
      * Unparks the given virtual thread.
      */
     void unparkVirtualThread(Thread thread);
+
+    /**
+     * Set the lifetime of a thread to lt.
+     * @param thread
+     * @param lt
+     * @return previous Lifetime
+     */
+    Lifetime unsafeSetLifetime(Thread thread, Lifetime lt);
 }

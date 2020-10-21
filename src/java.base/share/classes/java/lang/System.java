@@ -2336,6 +2336,10 @@ public final class System {
             public void unparkVirtualThread(Thread thread) {
                 ((VirtualThread) thread).unpark();
             }
+
+            public Lifetime unsafeSetLifetime(Thread thread, Lifetime lt) {
+                return thread.unsafeSetLifetime(lt);
+            }
         });
     }
 }

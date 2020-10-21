@@ -3124,12 +3124,12 @@ public class Thread implements Runnable {
     Lifetime unsafeSetLifetime(Lifetime lt) {
         assert (!isAlive() && lt.thread == Thread.currentThread())
             || this == Thread.currentThread(); // this ensures that depth does not concurrently change here
-        assert depth == parentDepth;
+        assert depth == parentDepth; // FIXME: This looks wrong.
 
-        var old = new Lifetime(parentThread, parentDepth);
+        var old = new Lifetime(parentThread, depth);
         this.parentThread = lt.thread;
         this.parentDepth = lt.depth();
-        this.depth = parentDepth;
+        this.depth = this.parentDepth;
         this.lifetime = lt;
         return old;
     }

@@ -24,6 +24,9 @@
  */
 package java.util.stream;
 
+import jdk.internal.access.JavaLangAccess;
+import jdk.internal.access.SharedSecrets;
+
 import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalDouble;
@@ -916,7 +919,12 @@ final class ReduceOps {
         @Override
         public <P_IN> R evaluateParallel(PipelineHelper<T> helper,
                                          Spliterator<P_IN> spliterator) {
-            return new ReduceTask<>(this, helper, spliterator).invoke().get();
+            var task = new ReduceTask<>(this, helper, spliterator);
+            try {
+                return task.invoke().get();
+            } finally {
+                task.lifetime.close();
+            }
         }
     }
 
@@ -929,17 +937,21 @@ final class ReduceOps {
             extends AbstractTask<P_IN, P_OUT, S, ReduceTask<P_IN, P_OUT, R, S>> {
         private final ReduceOp<P_OUT, R, S> op;
 
+        final Lifetime lifetime;
+
         ReduceTask(ReduceOp<P_OUT, R, S> op,
                    PipelineHelper<P_OUT> helper,
                    Spliterator<P_IN> spliterator) {
             super(helper, spliterator);
             this.op = op;
+            this.lifetime = Lifetime.start(); // experimental
         }
 
         ReduceTask(ReduceTask<P_IN, P_OUT, R, S> parent,
                    Spliterator<P_IN> spliterator) {
             super(parent, spliterator);
             this.op = parent.op;
+            this.lifetime = parent.lifetime; // experimental
         }
 
         @Override
@@ -949,7 +961,12 @@ final class ReduceOps {
 
         @Override
         protected S doLeaf() {
-            return helper.wrapAndCopyInto(op.makeSink(), spliterator);
+            Lifetime old = JLA.unsafeSetLifetime(Thread.currentThread(), this.lifetime);
+            try {
+                return helper.wrapAndCopyInto(op.makeSink(), spliterator);
+            } finally {
+                JLA.unsafeSetLifetime(Thread.currentThread(), old);
+            }
         }
 
         @Override
@@ -963,4 +980,6 @@ final class ReduceOps {
             super.onCompletion(caller);
         }
     }
+
+    private static final JavaLangAccess JLA = SharedSecrets.getJavaLangAccess();
 }

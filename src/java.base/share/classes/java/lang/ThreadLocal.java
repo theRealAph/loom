@@ -352,7 +352,7 @@ public class ThreadLocal<T> {
      * @param klass TBD
      * @return TBD
      */
-    public static <T> LightweightThreadLocal<T> forType(Class<T> klass) {
+    public static <T> ThreadLocal<T> forType(Class<T> klass) {
         return new LightweightThreadLocal<T>(klass);
     }
 
@@ -364,7 +364,7 @@ public class ThreadLocal<T> {
      */
     @SuppressWarnings(value = {"unchecked", "rawtypes"})
     // one map has entries for all types <T>
-    public AutoCloseable bind(T t) {
+    public ThreadLocalBinding bind(T t) {
         Thread thread = Thread.currentThread();
         ThreadLocalMap map = getMap(thread);
         ThreadLocalMap.Entry e = map != null ? map.getEntry(this) : null;
@@ -376,7 +376,7 @@ public class ThreadLocal<T> {
         return binding;
     }
 
-    class Binding implements AutoCloseable {
+    final class Binding extends ThreadLocalBinding {
 
         final ThreadLocal<?> referent;
         final Object prev;    // Should this be a WeakReference?

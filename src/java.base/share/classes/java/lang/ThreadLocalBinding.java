@@ -25,43 +25,10 @@
 
 package java.lang;
 
-import java.io.*;
-import jdk.internal.misc.UnsafeConstants;
-
 /**
  * TBD
  */
-final class ScopedBinding extends ThreadLocalBinding
-    implements AutoCloseable {
-
-    final Object referent;
-    final Lifetime lifetime;
-
-    final Object prev;
-
-    static String cannotBindMsg(Object obj, Class<?> klass) {
-        return "Cannot bind " + obj.getClass().getName() + " to " + klass.getName();
-    }
-
-    /**
-     * TBD
-     * @param v TBD
-     * @param t TBD
-     * @param prev TBD
-     */
-    ScopedBinding(LightweightThreadLocal<?> v, Object t, Object prev, Lifetime lifetime) {
-        if (t != null && !v.getType().isInstance(t))
-            throw new ClassCastException(cannotBindMsg(t, v.getType()));
-        this.lifetime = lifetime;
-        this.prev = prev;
-        this.referent = v;
-    }
-
-    /**
-     * TBD
-     */
-    public final void close() {
-        ((LightweightThreadLocal)referent).release(prev);
-        lifetime.close();
-    }
+public abstract class ThreadLocalBinding implements AutoCloseable {
+    ThreadLocalBinding() { }
+    public abstract void close();
 }

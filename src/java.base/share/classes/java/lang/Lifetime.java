@@ -32,11 +32,6 @@ import jdk.internal.vm.annotation.Stable;
  * A Lifetime is a Thing.
  */
 public class Lifetime {
-    // v1:
-    @Stable final Lifetime parent;
-    @Stable ScopedMap scopedMap;
-
-    // v2:
     @Stable final Thread thread;
     private int depth;
 
@@ -45,7 +40,6 @@ public class Lifetime {
     static private int counter;
 
     private Lifetime(Lifetime parent, Thread thread, int depth) {
-        this.parent = parent;
         this.thread = thread;
         this.depth = depth;
         synchronized (Lifetime.class){
@@ -80,7 +74,7 @@ public class Lifetime {
     final ScopedMap scopedMap() {
         var map = scopedMapOrNull();
         if (map == null) {
-            map = scopedMap = new ScopedMap();
+            map = new ScopedMap();
         }
         return map;
     }
@@ -90,6 +84,6 @@ public class Lifetime {
     }
 
     public String toString() {
-        return "parent: " + parent + " index: " + index;
+        return " index: " + index;
     }
 }
