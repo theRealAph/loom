@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2018, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2018, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -31,6 +31,7 @@
 #include "classfile/symbolTable.hpp"
 #include "classfile/systemDictionary.hpp"
 #include "classfile/systemDictionaryShared.hpp"
+#include "classfile/vmClasses.hpp"
 #include "classfile/vmSymbols.hpp"
 #include "gc/shared/gcLocker.hpp"
 #include "gc/shared/gcVMOperations.hpp"
@@ -264,7 +265,7 @@ oop HeapShared::archive_heap_object(oop obj, Thread* THREAD) {
 
   oop archived_oop = (oop)G1CollectedHeap::heap()->archive_mem_allocate(len);
   if (archived_oop != NULL) {
-    Copy::aligned_disjoint_words(cast_from_oop<HeapWord*>(obj), cast_from_oop<HeapWord*>(archived_oop), len);
+    obj->copy_disjoint(cast_from_oop<HeapWord*>(archived_oop), len);
     MetaspaceShared::relocate_klass_ptr(archived_oop);
     // Reinitialize markword to remove age/marking/locking/etc.
     //
@@ -504,10 +505,10 @@ void KlassSubGraphInfo::add_subgraph_object_klass(Klass* orig_k, Klass* relocate
   if (relocated_k->is_instance_klass()) {
     assert(InstanceKlass::cast(relocated_k)->is_shared_boot_class(),
           "must be boot class");
-    // SystemDictionary::xxx_klass() are not updated, need to check
+    // vmClasses::xxx_klass() are not updated, need to check
     // the original Klass*
-    if (orig_k == SystemDictionary::String_klass() ||
-        orig_k == SystemDictionary::Object_klass()) {
+    if (orig_k == vmClasses::String_klass() ||
+        orig_k == vmClasses::Object_klass()) {
       // Initialized early during VM initialization. No need to be added
       // to the sub-graph object class list.
       return;

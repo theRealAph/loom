@@ -144,7 +144,7 @@ inline oop PSPromotionManager::copy_to_survivor_space(oop o) {
   // The same test as "o->is_forwarded()"
   if (!test_mark.is_marked()) {
     bool new_obj_is_tenured = false;
-    size_t new_obj_size = o->size();
+    size_t new_obj_size = o->compact_size();
 
     // Find the objects age, MT safe.
     uint age = (test_mark.has_displaced_mark_helper() /* o->has_displaced_mark() */) ?
@@ -194,13 +194,13 @@ inline oop PSPromotionManager::copy_to_survivor_space(oop o) {
           // Do we allocate directly, or flush and refill?
           if (new_obj_size > (OldPLABSize / 2)) {
             // Allocate this object directly
-            new_obj = (oop)old_gen()->cas_allocate(new_obj_size);
+            new_obj = (oop)old_gen()->allocate(new_obj_size);
             promotion_trace_event(new_obj, o, new_obj_size, age, true, NULL);
           } else {
             // Flush and fill
             _old_lab.flush();
 
-            HeapWord* lab_base = old_gen()->cas_allocate(OldPLABSize);
+            HeapWord* lab_base = old_gen()->allocate(OldPLABSize);
             if(lab_base != NULL) {
 #ifdef ASSERT
               // Delay the initialization of the promotion lab (plab).
@@ -233,7 +233,7 @@ inline oop PSPromotionManager::copy_to_survivor_space(oop o) {
     assert(new_obj != NULL, "allocation should have succeeded");
 
     // Copy obj
-    Copy::aligned_disjoint_words(cast_from_oop<HeapWord*>(o), cast_from_oop<HeapWord*>(new_obj), new_obj_size);
+    o->copy_disjoint_compact(cast_from_oop<HeapWord*>(new_obj), new_obj_size);
 
     // Now we have to CAS in the header.
     // Make copy visible to threads reading the forwardee.

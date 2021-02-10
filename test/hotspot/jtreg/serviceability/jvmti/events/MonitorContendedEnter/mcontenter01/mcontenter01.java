@@ -23,8 +23,6 @@
 
 import jdk.test.lib.jvmti.DebugeeClass;
 
-import java.io.PrintStream;
-
 /*
  * @test
  *
@@ -35,7 +33,7 @@ import java.io.PrintStream;
  *     The test exercises JVMTI event callback function
  *         MonitorContendedEnter(jni, thread, object).
  *     The test checks if the thread and object parameters of the function
- *     contain expected values for callback when a thread is attemping
+ *     contain expected values for callback when a thread is attempting
  *     to enter a Java language monitor already acquired by another thread.
  * COMMENTS
  *     The test updated to match new JVMTI spec 0.2.90:
@@ -44,22 +42,20 @@ import java.io.PrintStream;
  *     1000 ms of sleep added to main thread to reduce probability of bad racing.
  *
  * @library /test/lib
- * @run main/othervm/native
- *      -agentlib:mcontenter01 mcontenter01
+ * @run main/othervm/native -agentlib:mcontenter01 mcontenter01 kernel
+ * @run main/othervm/native -agentlib:mcontenter01 mcontenter01 virtual
  */
 
 
 public class mcontenter01 extends DebugeeClass {
 
-    // load native library if required
     static {
         loadLibrary("mcontenter01");
     }
 
-    // run test from command line
-    public static void main(String argv[]) {
-        // JCK-compatible exit
-        int result =  new mcontenter01().runIt();
+    public static void main(String args[]) {
+        boolean isVirtual = "virtual".equals(args[0]);
+        int result = new mcontenter01().runIt(isVirtual);
         if (result != 0) {
             throw new RuntimeException("Unexpected status: " + result);
         }
@@ -69,24 +65,24 @@ public class mcontenter01 extends DebugeeClass {
     int status = DebugeeClass.TEST_PASSED;
     long timeout = 0;
 
-    // tested thread
-    mcontenter01Thread thread = null;
-
     // run debuggee
-    public int runIt() {
+    public int runIt(boolean isVirtual) {
         timeout = 60000; // milliseconds TODO fix
         System.out.println("Timeout = " + timeout + " msc.");
 
-        thread = new mcontenter01Thread("Debuggee Thread");
+        mcontenter01Task task = new mcontenter01Task();
+        Thread.Builder builder = Thread.builder().name("Debuggee Thread").task(task);
+        Thread thread = isVirtual ? builder.virtual().build() : builder.build();
+        setExpected(task.endingMonitor, thread);
 
-        synchronized (thread.endingMonitor) {
+        synchronized (task.endingMonitor) {
 
-            // run thread
+            // run task
             try {
-                // start thread
-                synchronized (thread.startingMonitor) {
+                // start task
+                synchronized (task.startingMonitor) {
                     thread.start();
-                    thread.startingMonitor.wait(timeout);
+                    task.startingMonitor.wait(timeout);
                 }
             } catch (InterruptedException e) {
                 throw new Failure(e);
@@ -106,31 +102,28 @@ public class mcontenter01 extends DebugeeClass {
             System.out.println("Thread started");
         }
 
-        // wait for thread finish
+        // wait for task finish
         try {
             thread.join(timeout);
         } catch (InterruptedException e) {
             throw new Failure(e);
         }
 
-        System.out.println("Sync: thread finished");
+        System.out.println("Sync: task finished");
         status = checkStatus(status);
 
         return status;
     }
 
     private native int getEventCount();
+    private native void setExpected(Object monitor, Object thread);
 }
 
 
 
-class mcontenter01Thread extends Thread {
+class mcontenter01Task implements Runnable {
     public Object startingMonitor = new Object();
     public Object endingMonitor = new Object();
-
-    public mcontenter01Thread(String name) {
-        super(name);
-    }
 
     public void run() {
 

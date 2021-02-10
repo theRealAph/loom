@@ -37,7 +37,6 @@ extern "C" {
 static jvmtiEnv *jvmti = NULL;
 static jvmtiEventCallbacks callbacks;
 static jint result = PASSED;
-static jboolean printdump = JNI_FALSE;
 static int eventsCount = 0;
 static int eventsExpected = 0;
 static const char *prefix = NULL;
@@ -49,19 +48,17 @@ void JNICALL ThreadEnd(jvmtiEnv *jvmti, JNIEnv *jni, jthread thread) {
 
   err = jvmti->GetThreadInfo(thread, &inf);
   if (err != JVMTI_ERROR_NONE) {
-    printf("(GetThreadInfo#%d) unexpected error: %s (%d)\n",
-           eventsCount, TranslateError(err), err);
+    printf("(GetThreadInfo#%d) unexpected error: %s (%d)\n", eventsCount, TranslateError(err), err);
     result = STATUS_FAILED;
   }
-  if (printdump == JNI_TRUE) {
-    printf(">>> %s\n", inf.name);
-  }
+
+  print_thread_info(jni, jvmti, thread);
+
   if (inf.name != NULL && strstr(inf.name, prefix) == inf.name) {
     eventsCount++;
     sprintf(name, "%s%d", prefix, eventsCount);
     if (inf.name == NULL || strcmp(name, inf.name) != 0) {
-      printf("(#%d) wrong thread name: \"%s\"",
-             eventsCount, inf.name);
+      printf("(#%d) wrong thread name: \"%s\"",eventsCount, inf.name);
       printf(", expected: \"%s\"\n", name);
       result = STATUS_FAILED;
     }
@@ -83,10 +80,6 @@ jint Agent_Initialize(JavaVM *jvm, char *options, void *reserved) {
   jvmtiError err;
   jint res;
 
-  if (options != NULL && strcmp(options, "printdump") == 0) {
-    printdump = JNI_TRUE;
-  }
-
   res = jvm->GetEnv((void **) &jvmti, JVMTI_VERSION_1_1);
   if (res != JNI_OK || jvmti == NULL) {
     printf("Wrong result of a valid call to GetEnv!\n");
@@ -105,8 +98,7 @@ jint Agent_Initialize(JavaVM *jvm, char *options, void *reserved) {
 }
 
 JNIEXPORT void JNICALL
-Java_threadend01_getReady(JNIEnv *jni,
-                                               jclass cls, jint i, jstring name) {
+Java_threadend01_getReady(JNIEnv *jni, jclass cls, jint i, jstring name) {
   jvmtiError err;
 
   if (jvmti == NULL) {

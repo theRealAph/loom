@@ -30,6 +30,8 @@
 #include "gc/shared/threadLocalAllocBuffer.hpp"
 #include "memory/allocation.hpp"
 #include "oops/oop.hpp"
+#include "oops/oopHandle.hpp"
+#include "oops/weakHandle.hpp"
 #include "runtime/continuation.hpp"
 #include "runtime/frame.hpp"
 #include "runtime/globals.hpp"
@@ -38,7 +40,6 @@
 #include "runtime/jniHandles.hpp"
 #include "runtime/mutexLocker.hpp"
 #include "runtime/os.hpp"
-#include "runtime/osThread.hpp"
 #include "runtime/park.hpp"
 #include "runtime/safepointMechanism.hpp"
 #include "runtime/stackWatermarkSet.hpp"
@@ -65,10 +66,9 @@ class JvmtiRawMonitor;
 class JvmtiSampledObjectAllocEventCollector;
 class JvmtiThreadState;
 class JvmtiVMObjectAllocEventCollector;
+class OSThread;
 class ThreadStatistics;
 class ConcurrentLocksDump;
-class ParkEvent;
-class Parker;
 class MonitorInfo;
 
 class BufferBlob;
@@ -1844,6 +1844,9 @@ public:
   JvmtiThreadState *jvmti_thread_state() const                                   { return _jvmti_thread_state; }
   static ByteSize jvmti_thread_state_offset()                                    { return byte_offset_of(JavaThread, _jvmti_thread_state); }
 
+  // Rebind JVMTI thread state from carrier to virtual or from virtual to carrier. 
+  JvmtiThreadState *rebind_to_jvmti_thread_state_of(oop thread_oop);
+
   // JVMTI PopFrame support
   // Setting and clearing popframe_condition
   // All of these enumerated values are bits. popframe_pending
@@ -1945,9 +1948,9 @@ public:
 
   // JSR166 per-thread parker
  private:
-  Parker*    _parker;
+  Parker _parker;
  public:
-  Parker*     parker() { return _parker; }
+  Parker* parker() { return &_parker; }
 
   // Biased locking support
  private:

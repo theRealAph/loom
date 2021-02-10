@@ -21,8 +21,6 @@
  * questions.
  */
 
-import java.io.PrintStream;
-
 /*
  * @test
  *
@@ -48,7 +46,6 @@ import java.io.PrintStream;
 
 public class framepop02 {
 
-    final static int JCK_STATUS_BASE = 95;
     final static int THREADS_LIMIT = 20;
     final static int NESTING_DEPTH = 100;
     final static String TEST_THREAD_NAME_BASE = "Test Thread #";
@@ -68,11 +65,10 @@ public class framepop02 {
     native static int check();
 
     public static void main(String args[]) {
-        TestThread[] t = new TestThread[THREADS_LIMIT];
+        Thread[] t = new Thread[THREADS_LIMIT];
         getReady();
         for (int i = 0; i < THREADS_LIMIT; i++) {
-            t[i] = new TestThread(TEST_THREAD_NAME_BASE + i);
-            t[i].start();
+            t[i] = Thread.builder().name(TEST_THREAD_NAME_BASE + i).virtual().task(new TestTask()).start();
         }
         for (int i = 0; i < THREADS_LIMIT; i++) {
             try {
@@ -87,17 +83,13 @@ public class framepop02 {
         }
     }
 
-    static class TestThread extends Thread {
+    static class TestTask implements Runnable {
         int nestingCount = 0;
-
-        // Constructor
-        TestThread(String name) {
-            super(name);
-        }
 
         public void run() {
             if (nestingCount < NESTING_DEPTH) {
                 nestingCount++;
+                System.out.println(".");
                 run();
             }
         }

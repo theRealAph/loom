@@ -36,28 +36,23 @@ static volatile jint result = PASSED;
 static volatile long wrongStepEv = 0;
 
 static jvmtiEnv *jvmti = NULL;
-static jvmtiEventCallbacks callbacks;
-static jvmtiCapabilities caps;
 
 /** callback functions **/
 void JNICALL
-SingleStep(jvmtiEnv *jvmti, JNIEnv* jni, jthread thread,
+SingleStep(jvmtiEnv *jvmti, JNIEnv *jni, jthread thread,
            jmethodID method, jlocation location) {
   jvmtiPhase phase;
   jvmtiError err;
-
 
   err = jvmti->GetPhase(&phase);
   if (err != JVMTI_ERROR_NONE) {
     result = STATUS_FAILED;
     NSK_COMPLAIN0("TEST FAILED: unable to obtain phase of the VM execution during SingleStep callback\n\n");
-  }
-  else {
+  } else {
     if (phase != JVMTI_PHASE_LIVE) {
       wrongStepEv++;
       result = STATUS_FAILED;
-      NSK_COMPLAIN1("TEST FAILED: SingleStep event received during non-live phase %s\n",
-                    TranslatePhase(phase));
+      NSK_COMPLAIN1("TEST FAILED: SingleStep event received during non-live phase %s\n", TranslatePhase(phase));
     }
   }
 }
@@ -71,10 +66,12 @@ VMDeath(jvmtiEnv *jvmti, JNIEnv *jni) {
         "TEST FAILED: there are %ld SingleStep events\n"
         "sent during non-live phase of the VM execution\n",
         wrongStepEv);
+    jni->FatalError("Test Failed.");
   }
 
-  if (result == STATUS_FAILED)
-    exit(95 + STATUS_FAILED);
+  if (result == STATUS_FAILED) {
+    jni->FatalError("Test Failed.");
+  }
 }
 /************************/
 
@@ -90,6 +87,8 @@ JNIEXPORT jint JNI_OnLoad_singlestep02(JavaVM *jvm, char *options, void *reserve
 }
 #endif
 jint Agent_Initialize(JavaVM *jvm, char *options, void *reserved) {
+  jvmtiEventCallbacks callbacks;
+  jvmtiCapabilities caps;
   jvmtiError err;
   jint res;
 
@@ -115,8 +114,10 @@ jint Agent_Initialize(JavaVM *jvm, char *options, void *reserved) {
            TranslateError(err), err);
     return JNI_ERR;
   }
-  if (!caps.can_generate_single_step_events)
-    NSK_DISPLAY0("Warning: generation of single step events is not implemented\n");
+  if (!caps.can_generate_single_step_events) {
+    printf("Warning: generation of single step events is not implemented\n");
+    return JNI_ERR;
+  }
 
   /* set event callback */
   NSK_DISPLAY0("setting event callbacks ...\n");

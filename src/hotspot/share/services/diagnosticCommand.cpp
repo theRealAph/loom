@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2011, 2020, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2011, 2021, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,6 +27,8 @@
 #include "classfile/classLoaderHierarchyDCmd.hpp"
 #include "classfile/classLoaderStats.hpp"
 #include "classfile/javaClasses.hpp"
+#include "classfile/systemDictionary.hpp"
+#include "classfile/vmClasses.hpp"
 #include "code/codeCache.hpp"
 #include "compiler/compileBroker.hpp"
 #include "compiler/directivesParser.hpp"
@@ -43,6 +45,7 @@
 #include "runtime/interfaceSupport.inline.hpp"
 #include "runtime/javaCalls.hpp"
 #include "runtime/os.hpp"
+#include "runtime/vm_version.hpp"
 #include "services/diagnosticArgument.hpp"
 #include "services/diagnosticCommand.hpp"
 #include "services/diagnosticFramework.hpp"
@@ -62,7 +65,7 @@ static void loadAgentModule(TRAPS) {
   JavaValue result(T_OBJECT);
   Handle h_module_name = java_lang_String::create_from_str("jdk.management.agent", CHECK);
   JavaCalls::call_static(&result,
-                         SystemDictionary::module_Modules_klass(),
+                         vmClasses::module_Modules_klass(),
                          vmSymbols::loadModule_name(),
                          vmSymbols::loadModule_signature(),
                          h_module_name,
@@ -448,7 +451,7 @@ void SystemGCDCmd::execute(DCmdSource source, TRAPS) {
 }
 
 void RunFinalizationDCmd::execute(DCmdSource source, TRAPS) {
-  Klass* k = SystemDictionary::System_klass();
+  Klass* k = vmClasses::System_klass();
   JavaValue result(T_VOID);
   JavaCalls::call_static(&result, k,
                          vmSymbols::run_finalization_name(),
@@ -1117,7 +1120,7 @@ void DebugOnCmdStartDCmd::execute(DCmdSource source, TRAPS) {
 JavaThreadDumpDCmd::JavaThreadDumpDCmd(outputStream* output, bool heap) :
                                        DCmdWithParser(output, heap),
   _format("-format", "Output format (\"plain\" or \"json\")", "STRING", false, "plain"),
-  _filepath("filepath", "The file path to the output file", "STRING", false, NULL) {
+  _filepath("filepath", "The file path to the output file", "STRING", true) {
   _dcmdparser.add_dcmd_option(&_format);
   _dcmdparser.add_dcmd_argument(&_filepath);
 }
@@ -1136,60 +1139,11 @@ int JavaThreadDumpDCmd::num_arguments() {
 void JavaThreadDumpDCmd::execute(DCmdSource source, TRAPS) {
   bool json = (_format.value() != NULL) && (strcmp(_format.value(), "json") == 0);
   char* path = _filepath.value();
-  if (path == NULL) {
-    if (json) {
-      dumpToOutputStream(vmSymbols::dumpThreadsToJson_name(), vmSymbols::void_byte_array_signature(), CHECK);
-    } else {
-      dumpToOutputStream(vmSymbols::dumpThreads_name(), vmSymbols::void_byte_array_signature(), CHECK);
-    }
+  if (json) {
+    dumpToFile(vmSymbols::dumpThreadsToJson_name(), vmSymbols::string_byte_array_signature(), path, CHECK);
   } else {
-    if (json) {
-      dumpToFile(vmSymbols::dumpThreadsToJson_name(), vmSymbols::string_byte_array_signature(), path, CHECK);
-    } else {
-      dumpToFile(vmSymbols::dumpThreads_name(), vmSymbols::string_byte_array_signature(), path, CHECK);
-    }
+    dumpToFile(vmSymbols::dumpThreads_name(), vmSymbols::string_byte_array_signature(), path, CHECK);
   }
-}
-
-void JavaThreadDumpDCmd::dumpToOutputStream(Symbol* name, Symbol* signature, TRAPS) {
-  ResourceMark rm(THREAD);
-  HandleMark hm(THREAD);
-
-  Symbol* sym = vmSymbols::jdk_internal_vm_ThreadDumper();
-  Klass* k = SystemDictionary::resolve_or_fail(sym, true, CHECK);
-  InstanceKlass* ik = InstanceKlass::cast(k);
-  if (HAS_PENDING_EXCEPTION) {
-    java_lang_Throwable::print(PENDING_EXCEPTION, output());
-    output()->cr();
-    CLEAR_PENDING_EXCEPTION;
-    return;
-  }
-
-  // invoke the method on ThreadDump to generate byte array
-  JavaValue result(T_OBJECT);
-  JavaCallArguments args;
-  JavaCalls::call_static(&result,
-                         ik,
-                         name,
-                         signature,
-                         &args,
-                         THREAD);
-  if (HAS_PENDING_EXCEPTION) {
-    java_lang_Throwable::print(PENDING_EXCEPTION, output());
-    output()->cr();
-    CLEAR_PENDING_EXCEPTION;
-    return;
-  }
-
-  // check that result is byte array
-  oop res = (oop)result.get_jobject();
-  assert(res->is_typeArray(), "just checking");
-  assert(TypeArrayKlass::cast(res->klass())->element_type() == T_BYTE, "just checking");
-
-  // copy the bytes to the output stream
-  typeArrayOop ba = typeArrayOop(res);
-  jbyte* addr = typeArrayOop(res)->byte_at_addr(0);
-  output()->print_raw((const char*)addr, ba->length());
 }
 
 void JavaThreadDumpDCmd::dumpToFile(Symbol* name, Symbol* signature, const char* path, TRAPS) {
