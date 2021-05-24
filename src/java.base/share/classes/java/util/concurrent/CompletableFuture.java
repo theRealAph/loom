@@ -472,7 +472,7 @@ public class CompletableFuture<T> implements Future<T>, CompletionStage<T> {
         implements Runnable, AsynchronousCompletionTask {
         volatile Completion next;      // Treiber stack link
 
-        private ScopeLocal.Snapshot snapshot = ScopeLocal.snapshot();
+        private ScopeLocal.Carrier snapshot = ScopeLocal.snapshot();
 
         /**
          * Performs completion action if triggered, returning a
@@ -487,7 +487,7 @@ public class CompletableFuture<T> implements Future<T>, CompletionStage<T> {
 
         public final void run() {
             if (snapshot != ScopeLocal.snapshot()) {
-                ScopeLocal.runWithSnapshot(() -> tryFire(ASYNC), snapshot);
+                snapshot.run(() -> tryFire(ASYNC));
             } else {
                 tryFire(ASYNC);
             }
@@ -1807,7 +1807,7 @@ public class CompletableFuture<T> implements Future<T>, CompletionStage<T> {
             this.dep = dep; this.fn = fn;
         }
 
-        private ScopeLocal.Snapshot snapshot = ScopeLocal.snapshot();
+        private ScopeLocal.Carrier snapshot = ScopeLocal.snapshot();
 
         public final Void getRawResult() { return null; }
         public final void setRawResult(Void v) {}
@@ -1831,7 +1831,7 @@ public class CompletableFuture<T> implements Future<T>, CompletionStage<T> {
 
         public void run() {
             if (snapshot != ScopeLocal.snapshot()) {
-                ScopeLocal.runWithSnapshot(this::doRun, snapshot);
+                snapshot.run(this::doRun);
             } else {
                 doRun();
             }
