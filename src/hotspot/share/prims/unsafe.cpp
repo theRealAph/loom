@@ -1127,6 +1127,9 @@ static JNINativeMethod jdk_internal_misc_Unsafe_methods[] = {
     {CC "loadFence",          CC "()V",                  FN_PTR(Unsafe_LoadFence)},
     {CC "storeFence",         CC "()V",                  FN_PTR(Unsafe_StoreFence)},
     {CC "fullFence",          CC "()V",                  FN_PTR(Unsafe_FullFence)},
+
+    {CC "setScopeLocalCache",          CC "(" OBJ ")V",                  FN_PTR(JVM_UnsafeSetScopeLocalCache)},
+
 };
 
 #undef CC
