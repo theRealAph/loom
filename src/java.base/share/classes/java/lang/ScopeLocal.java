@@ -103,11 +103,6 @@ public final class ScopeLocal<T> {
     private final @Stable Class<? super T> type;
     private final @Stable int hash;
 
-    // Is this scope-local value inheritable? We could handle this by
-    // making ScopeLocal an abstract base class and scopeLocalBindings() a
-    // virtual method, but that seems a little excessive.
-    private final @Stable boolean isInheritable;
-
     public final int hashCode() { return hash; }
 
     /**
@@ -202,7 +197,7 @@ public final class ScopeLocal<T> {
         public <T> Carrier where(ScopeLocal<T> key, T value) {
             short primaryBits = (short) (1 << Cache.primaryIndex(key) | this.primaryBits);
             short secondaryBits = (short) (1 << Cache.secondaryIndex(key) | this.secondaryBits);
-            return BoundValues.where(key, value, bindings, null, primaryBits, secondaryBits);
+            return BoundValues.where(key, value, bindings, primaryBits, secondaryBits);
         }
 
         /**
@@ -359,11 +354,10 @@ public final class ScopeLocal<T> {
         // Bit masks: a 1 in postion n indicates that this set of bound values
         // hits that slot in the cache
         final short primaryBits, secondaryBits;
-        final SingleBinding inheritables, nonInheritables;
+        final SingleBinding inheritables;
 
-        BoundValues(SingleBinding inheritables, SingleBinding nonInheritables, short primaryBits, short secondaryBits) {
+        BoundValues(SingleBinding inheritables, short primaryBits, short secondaryBits) {
             this.inheritables = inheritables;
-            this.nonInheritables = nonInheritables;
             this.primaryBits = primaryBits;
             this.secondaryBits = secondaryBits;
         }
@@ -372,16 +366,12 @@ public final class ScopeLocal<T> {
          * Add a binding to this map, returning a new Carrier instance.
          */
         private static final <T> BoundValues where(ScopeLocal<T> key, T value,
-                                           SingleBinding inheritables, SingleBinding nonInheritables,
+                                           SingleBinding inheritables,
                                            short primaryBits, short secondaryBits) {
-            if (key.isInheritable) {
-                inheritables = new SingleBinding(key, value, inheritables);
-            } else {
-                nonInheritables = new SingleBinding(key, value, nonInheritables);
-            }
+            inheritables = new SingleBinding(key, value, inheritables);
             primaryBits |= (short)(1 << Cache.primaryIndex(key));
             secondaryBits |= (short)(1 << Cache.secondaryIndex(key));
-            return new BoundValues(inheritables, nonInheritables, primaryBits, secondaryBits);
+            return new BoundValues(inheritables, primaryBits, secondaryBits);
         }
 
         /**
@@ -393,14 +383,14 @@ public final class ScopeLocal<T> {
          * @return TBD
          */
         public final <T> BoundValues where(ScopeLocal<T> key, T value) {
-            return where(key, value, inheritables, nonInheritables, primaryBits, secondaryBits);
+            return where(key, value, inheritables, primaryBits, secondaryBits);
         }
 
         /*
          * Return a new set consisting of a single binding.
          */
         static final <T> BoundValues of(ScopeLocal<T> key, T value) {
-            return where(key, value, null, null, (short)0, (short)0);
+            return where(key, value, null, (short)0, (short)0);
         }
 
         /**
@@ -411,7 +401,7 @@ public final class ScopeLocal<T> {
          */
         @SuppressWarnings("unchecked")
         public final <T> T get(ScopeLocal<T> key) {
-            for (SingleBinding b = key.isInheritable ? inheritables : nonInheritables;
+            for (SingleBinding b = inheritables;
                  b != null; b = b.prev) {
                 if (b.getKey() == key) {
                     Object value = b.get();
@@ -435,13 +425,11 @@ public final class ScopeLocal<T> {
         public final <R> R call(Callable<R> op) throws Exception {
             Objects.requireNonNull(op);
             Cache.invalidate(primaryBits | secondaryBits);
-            var inheritables = addScopeLocalBindings(this.inheritables, primaryBits, secondaryBits, true);
-            var nonInheritables = addScopeLocalBindings(this.nonInheritables, primaryBits, secondaryBits, false);
+            var inheritables = addScopeLocalBindings(this.inheritables, primaryBits, secondaryBits);
             try {
                 return op.call();
             } finally {
                 Thread currentThread = Thread.currentThread();
-                currentThread.noninheritableScopeLocalBindings = nonInheritables;
                 currentThread.inheritableScopeLocalBindings = inheritables;
                 Cache.invalidate(primaryBits | secondaryBits);
             }
@@ -458,13 +446,11 @@ public final class ScopeLocal<T> {
         public final void run(Runnable op) {
             Objects.requireNonNull(op);
             Cache.invalidate(primaryBits | secondaryBits);
-            var inheritables = addScopeLocalBindings(this.inheritables, primaryBits, secondaryBits, true);
-            var nonInheritables = addScopeLocalBindings(this.nonInheritables, primaryBits, secondaryBits, false);
+            var inheritables = addScopeLocalBindings(this.inheritables, primaryBits, secondaryBits);
             try {
                 op.run();
             } finally {
                 Thread currentThread = Thread.currentThread();
-                currentThread.noninheritableScopeLocalBindings = nonInheritables;
                 currentThread.inheritableScopeLocalBindings = inheritables;
                 Cache.invalidate(primaryBits | secondaryBits);
             }
@@ -473,11 +459,11 @@ public final class ScopeLocal<T> {
         /*
          * Add a list of bindings to the current Thread's set of bound values.
          */
-        private final static Snapshot addScopeLocalBindings(SingleBinding bindings, short primaryBits, short secondaryBits, boolean isInheritable) {
-            Snapshot prev = getScopeLocalBindings(isInheritable);
+        private final static Snapshot addScopeLocalBindings(SingleBinding bindings, short primaryBits, short secondaryBits) {
+            Snapshot prev = getScopeLocalBindings();
             if (bindings != null) {
                 var b = new Snapshot(bindings, prev, primaryBits, secondaryBits);
-                ScopeLocal.setScopeLocalBindings(b, isInheritable);
+                ScopeLocal.setScopeLocalBindings(b);
             }
             return prev;
         }
@@ -527,9 +513,8 @@ public final class ScopeLocal<T> {
         where(key, value).run(op);
     }
 
-    private ScopeLocal(Class<? super T> type, boolean isInheritable) {
+    private ScopeLocal(Class<? super T> type) {
         this.type = Objects.requireNonNull(type);
-        this.isInheritable = isInheritable;
         this.hash = generateKey();
     }
 
@@ -542,19 +527,7 @@ public final class ScopeLocal<T> {
      * @return a scope variable
      */
     public static <U,T extends U> ScopeLocal<T> forType(Class<U> type) {
-        return new ScopeLocal<T>(type, false);
-    }
-
-    /**
-     * Creates an inheritable scoped variable to hold a value with the given type.
-     *
-     * @param <T> the type of the scoped variable's value.
-     * @param <U> a supertype of {@code T}. It should either be {@code T} itself or, if T is a parameterized type, its generic type.
-     * @param type The {@code Class} instance {@code T.class}
-     * @return a scope variable
-     */
-    public static <U,T extends U> ScopeLocal<T> inheritableForType(Class<U> type) {
-        return new ScopeLocal<T>(type, true);
+        return new ScopeLocal<T>(type);
     }
 
     /**
@@ -658,24 +631,16 @@ public final class ScopeLocal<T> {
         }
     }
 
-    private static Snapshot getScopeLocalBindings(boolean isInheritable) {
-        Thread currentThread = Thread.currentThread();
-        return isInheritable
-                ? currentThread.inheritableScopeLocalBindings
-                : currentThread.noninheritableScopeLocalBindings;
+    private static Snapshot getScopeLocalBindings() {
+        return Thread.currentThread().inheritableScopeLocalBindings;
     }
 
-    private static void setScopeLocalBindings(Snapshot bindings, boolean isInheritable) {
-        Thread currentThread = Thread.currentThread();
-        if (isInheritable) {
-            currentThread.inheritableScopeLocalBindings = bindings;
-        } else {
-            currentThread.noninheritableScopeLocalBindings = bindings;
-        }
+    private static void setScopeLocalBindings(Snapshot bindings) {
+        Thread.currentThread().inheritableScopeLocalBindings = bindings;
     }
 
     private Snapshot scopeLocalBindings() {
-        return getScopeLocalBindings(isInheritable);
+        return getScopeLocalBindings();
     }
 
     private static int nextKey = 0xf0f0_f0f0;
