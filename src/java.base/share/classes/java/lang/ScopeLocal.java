@@ -99,74 +99,11 @@ import static jdk.internal.javac.PreviewFeature.Feature.SCOPE_LOCALS;
  * @since 99
  */
 @jdk.internal.javac.PreviewFeature(feature=SCOPE_LOCALS)
-public final class ScopeLocal<T> {
+public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
     private final @Stable Class<? super T> type;
     private final @Stable int hash;
 
     public final int hashCode() { return hash; }
-
-    /**
-     * An immutable map from a set of ScopeLocals to their bound values.
-     * When map() or call() is invoked, the ScopeLocals bound in this set
-     * are bound, such that calling the get() method returns the associated
-     * value.
-     */
-    @jdk.internal.javac.PreviewFeature(feature=SCOPE_LOCALS)
-    public abstract static class Carrier {
-        private Carrier() { }
-
-        /**
-         * Runs a value-returning operation with this some ScopeLocals bound to values.
-         * Code executed by the operation can use the {@link #get()} method to
-         * get the value of the variables. The variables revert to their previous values or
-         * becomes {@linkplain #isBound() unbound} when the operation completes.
-         *
-         * @param op    the operation to run
-         * @param <R>   the type of the result of the function
-         * @return the result
-         * @throws Exception if the operation completes with an exception
-         */
-        public abstract <R> R call(Callable<R> op) throws Exception;
-
-        /**
-         * Runs a value-returning operation with this some ScopeLocals bound to values.
-         * If the operation terminates with an exception {@code e}, apply {@code handler}
-         * to {@code e} and return the result.
-         *
-         * @param op the operation to run
-         * @param handler a function to be applied if the operation completes with an exception
-         * @param <R> the type of the result of the function
-         * @return the result
-         */
-        public final <R> R callOrElse(Callable<R> op,
-                                      Function<? super Exception, ? extends R> handler) {
-            try {
-                return call(op);
-            } catch (Exception e) {
-                return handler.apply(e);
-            }
-        }
-
-        /**
-         * Runs an operation with some ScopeLocals bound to our values.
-         * Code executed by the operation can use the {@link #get()} method to
-         * get the value of the variables. The variables revert to their previous values or
-         * becomes {@linkplain #isBound() unbound} when the operation completes.
-         *
-         * @param op    the operation to run
-         */
-        public abstract void run(Runnable op);
-
-        /**
-         * Return a new Carrier, which consists of the contents of this Carrier plus a
-         * new binding of key and value.
-         * @param key   The ScopeLocal to bind a value to
-         * @param value The new value
-         * @param <T>   The type of the ScopeLocal
-         * @return TBD
-         */
-        public abstract <T> Carrier where(ScopeLocal<T> key, T value);
-    }
 
     /**
      * An immutable map from {@code ScopeLocal} to values.
@@ -179,25 +116,18 @@ public final class ScopeLocal<T> {
      */
 
     @jdk.internal.javac.PreviewFeature(feature=SCOPE_LOCALS)
-    static class Snapshot extends Carrier {
+    public static class Snapshot {
         final Snapshot prev;
-        final SingleBinding bindings;
-        final short primaryBits;
-        final short secondaryBits;
+        final Carrier bindings;
+        short primaryBits, secondaryBits;
 
         private static final Object NIL = new Object();
 
-        Snapshot(SingleBinding bindings, Snapshot prev, short primaryBits, short secondaryBits) {
+        Snapshot(Carrier bindings, Snapshot prev, short primaryBits, short secondaryBits) {
             this.prev = prev;
             this.bindings = bindings;
             this.primaryBits = primaryBits;
             this.secondaryBits = secondaryBits;
-        }
-
-        public <T> Carrier where(ScopeLocal<T> key, T value) {
-            short primaryBits = (short) (1 << Cache.primaryIndex(key) | this.primaryBits);
-            short secondaryBits = (short) (1 << Cache.secondaryIndex(key) | this.secondaryBits);
-            return BoundValues.where(key, value, bindings, primaryBits, secondaryBits);
         }
 
         /**
@@ -252,7 +182,7 @@ public final class ScopeLocal<T> {
         Object find(ScopeLocal<?> key) {
             for (Snapshot b = this; b != null; b = b.prev) {
                 if (((1 << Cache.primaryIndex(key)) & b.primaryBits) != 0) {
-                    for (SingleBinding binding = b.bindings;
+                    for (Carrier binding = b.bindings;
                          binding != null;
                          binding = binding.prev) {
                         if (binding.getKey() == key) {
@@ -263,6 +193,27 @@ public final class ScopeLocal<T> {
                 }
             }
             return NIL;
+        }
+    }
+
+    /**
+     * Creates a binding for a ScopeLocal instance.
+     * That {@link Carrier} may be used later to invoke a {@link Callable} or
+     * {@link Runnable} instance. More bindings may be added to the {@link Carrier}
+     * by the {@link Carrier#where(ScopeLocal, Object)} method.
+     *
+     * @param value The value to bind it to
+     * @param <T> the type of the ScopeLocal
+     * @param prev the previous binding in the list
+     * @return A Carrier instance that contains one binding, that of key and value
+     */
+    @Override
+    protected Carrier bind(T value, Carrier prev) {
+        if (prev == null) {
+            return new Carrier(this, value, prev, (short)0, (short)0);
+        } else {
+            return new Carrier(this, value, prev,
+                    prev.primaryBits, prev.secondaryBits);
         }
     }
 
@@ -288,9 +239,9 @@ public final class ScopeLocal<T> {
          * @param <T> the type of the ScopeLocal
          * @return A Carrier instance that contains one binding, that of key and value
          */
-        public <T> Carrier where(ScopeLocal<T> key, T value) {
+        public <T> Carrier where(AbstractScopeLocal<T> key, T value) {
             // This could be made more efficient by not creating the Carrier instance.
-            return BoundValues.of(key, value);
+            return ScopeLocal.where(key, value);
         }
 
         /**
@@ -344,132 +295,6 @@ public final class ScopeLocal<T> {
     }
 
     /**
-     * An immutable map from a set of ScopeLocals to their bound values.
-     * When map() or call() is invoked, the ScopeLocals bound in this set
-     * are bound, such that calling the get() method returns the associated
-     * value.
-     */
-    @jdk.internal.javac.PreviewFeature(feature=SCOPE_LOCALS)
-    private static class BoundValues extends Carrier {
-        // Bit masks: a 1 in postion n indicates that this set of bound values
-        // hits that slot in the cache
-        final short primaryBits, secondaryBits;
-        final SingleBinding inheritables;
-
-        BoundValues(SingleBinding inheritables, short primaryBits, short secondaryBits) {
-            this.inheritables = inheritables;
-            this.primaryBits = primaryBits;
-            this.secondaryBits = secondaryBits;
-        }
-
-        /**
-         * Add a binding to this map, returning a new Carrier instance.
-         */
-        private static final <T> BoundValues where(ScopeLocal<T> key, T value,
-                                           SingleBinding inheritables,
-                                           short primaryBits, short secondaryBits) {
-            inheritables = new SingleBinding(key, value, inheritables);
-            primaryBits |= (short)(1 << Cache.primaryIndex(key));
-            secondaryBits |= (short)(1 << Cache.secondaryIndex(key));
-            return new BoundValues(inheritables, primaryBits, secondaryBits);
-        }
-
-        /**
-         * Return a new map, which consists of the contents of this map plus a
-         * new binding of key and value.
-         * @param key   The ScopeLocal to bind a value to
-         * @param value The new value
-         * @param <T>   The type of the ScopeLocal
-         * @return TBD
-         */
-        public final <T> BoundValues where(ScopeLocal<T> key, T value) {
-            return where(key, value, inheritables, primaryBits, secondaryBits);
-        }
-
-        /*
-         * Return a new set consisting of a single binding.
-         */
-        static final <T> BoundValues of(ScopeLocal<T> key, T value) {
-            return where(key, value, null, (short)0, (short)0);
-        }
-
-        /**
-         * Search for the value of a binding in this set
-         * @param key the ScopeLocal to find
-         * @param <T> the type of the ScopeLocal
-         * @return the value
-         */
-        @SuppressWarnings("unchecked")
-        public final <T> T get(ScopeLocal<T> key) {
-            for (SingleBinding b = inheritables;
-                 b != null; b = b.prev) {
-                if (b.getKey() == key) {
-                    Object value = b.get();
-                    return (T)value;
-                }
-            }
-            throw new NoSuchElementException();
-        }
-
-        /**
-         * Runs a value-returning operation with this some ScopeLocals bound to values.
-         * Code executed by the operation can use the {@link #get()} method to
-         * get the value of the variables. The variables revert to their previous values or
-         * becomes {@linkplain #isBound() unbound} when the operation completes.
-         *
-         * @param op    the operation to run
-         * @param <R>   the type of the result of the function
-         * @return the result
-         * @throws Exception if the operation completes with an exception
-         */
-        public final <R> R call(Callable<R> op) throws Exception {
-            Objects.requireNonNull(op);
-            Cache.invalidate(primaryBits | secondaryBits);
-            var inheritables = addScopeLocalBindings(this.inheritables, primaryBits, secondaryBits);
-            try {
-                return op.call();
-            } finally {
-                Thread currentThread = Thread.currentThread();
-                currentThread.inheritableScopeLocalBindings = inheritables;
-                Cache.invalidate(primaryBits | secondaryBits);
-            }
-        }
-
-        /**
-         * Runs an operation with some ScopeLocals bound to our values.
-         * Code executed by the operation can use the {@link #get()} method to
-         * get the value of the variables. The variables revert to their previous values or
-         * becomes {@linkplain #isBound() unbound} when the operation completes.
-         *
-         * @param op    the operation to run
-         */
-        public final void run(Runnable op) {
-            Objects.requireNonNull(op);
-            Cache.invalidate(primaryBits | secondaryBits);
-            var inheritables = addScopeLocalBindings(this.inheritables, primaryBits, secondaryBits);
-            try {
-                op.run();
-            } finally {
-                Thread currentThread = Thread.currentThread();
-                currentThread.inheritableScopeLocalBindings = inheritables;
-                Cache.invalidate(primaryBits | secondaryBits);
-            }
-        }
-
-        /*
-         * Add a list of bindings to the current Thread's set of bound values.
-         */
-        private final static Snapshot addScopeLocalBindings(SingleBinding bindings, short primaryBits, short secondaryBits) {
-            Snapshot prev = getScopeLocalBindings();
-            if (bindings != null) {
-                var b = new Snapshot(bindings, prev, primaryBits, secondaryBits);
-                ScopeLocal.setScopeLocalBindings(b);
-            }
-            return prev;
-        }
-    }
-
-    /**
      * Creates a binding for a ScopeLocal instance.
      * That {@link Carrier} may be used later to invoke a {@link Callable} or
      * {@link Runnable} instance. More bindings may be added to the {@link Carrier}
@@ -480,9 +305,8 @@ public final class ScopeLocal<T> {
      * @param <T> the type of the ScopeLocal
      * @return A Carrier instance that contains one binding, that of key and value
      */
-    public static <T> Carrier where(ScopeLocal<T> key, T value) {
-        // This could be made more efficient by not creating the Carrier instance.
-        return BoundValues.of(key, value);
+    public static <T> Carrier where(AbstractScopeLocal<T> key, T value) {
+        return key.bind(value, null);
     }
 
     /**
@@ -496,8 +320,7 @@ public final class ScopeLocal<T> {
      * @return the result
      * @throws Exception if the operation completes with an exception
      */
-    public static <T, U> U where(ScopeLocal<T> key, T value, Callable<U> op) throws Exception {
-        // This could be made more efficient by not creating the Carrier instance.
+    public static <T, U> U where(AbstractScopeLocal<T> key, T value, Callable<U> op) throws Exception {
         return where(key, value).call(op);
     }
 
@@ -509,7 +332,7 @@ public final class ScopeLocal<T> {
      * @param <T> the type of the ScopeLocal
      * @param op the operation to run
      */
-    public static <T> void where(ScopeLocal<T> key, T value, Runnable op) {
+    public static <T> void where(AbstractScopeLocal<T> key, T value, Runnable op) {
         where(key, value).run(op);
     }
 
@@ -669,7 +492,7 @@ public final class ScopeLocal<T> {
      *
      * @return a "snapshot" of the currently-bound inheritable scoped variables.
      */
-    public static Carrier snapshot() {
+    public static Snapshot snapshot() {
         var result = Thread.currentThread().inheritableScopeLocalBindings;
         return result != null ? result : EmptySnapshot.getInstance();
     }
@@ -684,7 +507,7 @@ public final class ScopeLocal<T> {
      * @return the result
      * @throws Exception if the operation completes with an exception
      */
-    public static <R> R callWithSnapshot(Callable<R> op, Carrier s) throws Exception {
+    public static <R> R callWithSnapshot(Callable<R> op, Snapshot s) throws Exception {
         return s.call(op);
     }
 
@@ -694,20 +517,32 @@ public final class ScopeLocal<T> {
      * @param op the operation to run
      * @param s the Snapshot. May be null.
      */
-    public static void runWithSnapshot(Runnable op, Carrier s) {
+    public static void runWithSnapshot(Runnable op, Snapshot s) {
         s.run(op);
     }
 
-    // An immutable object that represents the binding of a single value
-    // to a single key.
-    static final class SingleBinding {
+    /**
+     * An immutable map from a set of ScopeLocals to their bound values.
+     * When map() or call() is invoked, the ScopeLocals bound in this set
+     * are bound, such that calling the get() method returns the associated
+     * value.
+     */
+    @jdk.internal.javac.PreviewFeature(feature=SCOPE_LOCALS)
+    public static final class Carrier {
         final ScopeLocal<?> key;
         final Object value;
-        final SingleBinding prev;
+        final Carrier prev;
+        // Bit masks: a 1 in postion n indicates that this set of bound values
+        // hits that slot in the cache
+        final short primaryBits, secondaryBits;
 
-        SingleBinding(ScopeLocal<?> key, Object value, SingleBinding prev) {
+        Carrier(ScopeLocal<?> key, Object value, Carrier prev, short primaryBits, short secondaryBits) {
             this.value = key.type.cast(value);
             this.key = key;
+            primaryBits |= (short)(1 << Cache.primaryIndex(key));
+            secondaryBits |= (short)(1 << Cache.secondaryIndex(key));
+            this.primaryBits = primaryBits;
+            this.secondaryBits = secondaryBits;
             this.prev = prev;
         }
 
@@ -717,6 +552,111 @@ public final class ScopeLocal<T> {
 
         final ScopeLocal<?> getKey() {
             return key;
+        }
+        /**
+         * Runs a value-returning operation with this some ScopeLocals bound to values.
+         * Code executed by the operation can use the {@link #get()} method to
+         * get the value of the variables. The variables revert to their previous values or
+         * becomes {@linkplain #isBound() unbound} when the operation completes.
+         *
+         * @param op    the operation to run
+         * @param <R>   the type of the result of the function
+         * @return the result
+         * @throws Exception if the operation completes with an exception
+         */
+        public final <R> R call(Callable<R> op) throws Exception {
+            Objects.requireNonNull(op);
+            Cache.invalidate(primaryBits | secondaryBits);
+            var inheritables = addScopeLocalBindings(this, primaryBits, secondaryBits);
+            try {
+                return op.call();
+            } finally {
+                Thread currentThread = Thread.currentThread();
+                currentThread.inheritableScopeLocalBindings = inheritables;
+                Cache.invalidate(primaryBits | secondaryBits);
+            }
+        }
+
+        /**
+         * Runs a value-returning operation with this some ScopeLocals bound to values.
+         * If the operation terminates with an exception {@code e}, apply {@code handler}
+         * to {@code e} and return the result.
+         *
+         * @param op the operation to run
+         * @param handler a function to be applied if the operation completes with an exception
+         * @param <R> the type of the result of the function
+         * @return the result
+         */
+        public final <R> R callOrElse(Callable<R> op,
+                                      Function<? super Exception, ? extends R> handler) {
+            try {
+                return call(op);
+            } catch (Exception e) {
+                return handler.apply(e);
+            }
+        }
+
+        /**
+         * Runs an operation with some ScopeLocals bound to our values.
+         * Code executed by the operation can use the {@link #get()} method to
+         * get the value of the variables. The variables revert to their previous values or
+         * becomes {@linkplain #isBound() unbound} when the operation completes.
+         *
+         * @param op    the operation to run
+         */
+        public final void run(Runnable op) {
+            Objects.requireNonNull(op);
+            Cache.invalidate(primaryBits | secondaryBits);
+            var inheritables = addScopeLocalBindings(this, primaryBits, secondaryBits);
+            try {
+                op.run();
+            } finally {
+                Thread currentThread = Thread.currentThread();
+                currentThread.inheritableScopeLocalBindings = inheritables;
+                Cache.invalidate(primaryBits | secondaryBits);
+            }
+        }
+
+        /*
+         * Add a list of bindings to the current Thread's set of bound values.
+         */
+        private final static Snapshot addScopeLocalBindings(Carrier bindings, short primaryBits, short secondaryBits) {
+            Snapshot prev = getScopeLocalBindings();
+            if (bindings != null) {
+                var b = new Snapshot(bindings, prev, primaryBits, secondaryBits);
+                ScopeLocal.setScopeLocalBindings(b);
+            }
+            return prev;
+        }
+
+        /**
+         * Add a binding to this map, returning a new Carrier instance.
+         */
+        private static final <T> Carrier where(ScopeLocal<T> key, T value,
+                                                   Carrier inheritables,
+                                                   short primaryBits, short secondaryBits) {
+            primaryBits |= (short)(1 << Cache.primaryIndex(key));
+            secondaryBits |= (short)(1 << Cache.secondaryIndex(key));
+            return new Carrier(key, value, inheritables, primaryBits, secondaryBits);
+        }
+
+        /**
+         * Return a new map, which consists of the contents of this map plus a
+         * new binding of key and value.
+         * @param key   The ScopeLocal to bind a value to
+         * @param value The new value
+         * @param <T>   The type of the ScopeLocal
+         * @return TBD
+         */
+        public final <T> Carrier where(AbstractScopeLocal<T> key, T value) {
+            return key.bind(value, this);
+        }
+
+        /*
+         * Return a new set consisting of a single binding.
+         */
+        static final <T> Carrier of(ScopeLocal<T> key, T value) {
+            return where(key, value, null, (short)0, (short)0);
         }
     }
 
@@ -811,11 +751,13 @@ public final class ScopeLocal<T> {
         }
 
         // Null a set of cache entries, indicated by the 1-bits given
+        // Only nulls keys, not values. Maybe it should null the values
+        // as well.
         static void invalidate(int toClearBits) {
             assert(toClearBits == (short)toClearBits);
             Object[] objects;
             if ((objects = Thread.scopeLocalCache()) != null) {
-                for (short bits = (short)toClearBits;
+                for (int bits = toClearBits & 0xffff;
                      bits != 0; ) {
                     int index = Integer.numberOfTrailingZeros(bits);
                     setKey(objects, index, null);

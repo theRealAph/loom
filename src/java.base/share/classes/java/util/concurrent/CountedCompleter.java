@@ -433,7 +433,7 @@ public abstract class CountedCompleter<T> extends ForkJoinTask<T> {
     /** The number of pending tasks until completion */
     volatile int pending;
 
-    private final ScopeLocal.Carrier snapshot = ScopeLocal.snapshot();
+    private final ScopeLocal.Snapshot snapshot = ScopeLocal.snapshot();
 
     // Unsafe mechanics
     private static final Unsafe U = Unsafe.getUnsafe();
@@ -760,7 +760,7 @@ public abstract class CountedCompleter<T> extends ForkJoinTask<T> {
      */
     @Override
     protected final boolean exec() {
-        ScopeLocal.Carrier prev = ScopeLocal.snapshot();
+        ScopeLocal.Snapshot prev = ScopeLocal.snapshot();
         if (snapshot != prev) {
             Thread currentThread = Thread.currentThread();
             try {
