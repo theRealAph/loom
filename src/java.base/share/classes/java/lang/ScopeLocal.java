@@ -210,10 +210,9 @@ public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
     @Override
     protected Carrier bind(T value, Carrier prev) {
         if (prev == null) {
-            return new Carrier(this, value, prev, (short)0, (short)0);
+            return new Carrier(this, value);
         } else {
-            return new Carrier(this, value, prev,
-                    prev.primaryBits, prev.secondaryBits);
+            return new Carrier(this, value, prev);
         }
     }
 
@@ -536,14 +535,20 @@ public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
         // hits that slot in the cache
         final short primaryBits, secondaryBits;
 
-        Carrier(ScopeLocal<?> key, Object value, Carrier prev, short primaryBits, short secondaryBits) {
+        Carrier(ScopeLocal<?> key, Object value, Carrier prev) {
             this.value = key.type.cast(value);
             this.key = key;
-            primaryBits |= (short)(1 << Cache.primaryIndex(key));
-            secondaryBits |= (short)(1 << Cache.secondaryIndex(key));
-            this.primaryBits = primaryBits;
-            this.secondaryBits = secondaryBits;
+            this.primaryBits = (short)((1 << Cache.primaryIndex(key)) | prev.primaryBits);
+            this.secondaryBits = (short)((1 << Cache.secondaryIndex(key)) | prev.secondaryBits);
             this.prev = prev;
+        }
+
+        Carrier(ScopeLocal<?> key, Object value) {
+            this.value = key.type.cast(value);
+            this.key = key;
+            this.primaryBits = (short)(1 << Cache.primaryIndex(key));
+            this.secondaryBits = (short)(1 << Cache.secondaryIndex(key));
+            this.prev = null;
         }
 
         final Object get() {
@@ -567,7 +572,7 @@ public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
         public final <R> R call(Callable<R> op) throws Exception {
             Objects.requireNonNull(op);
             Cache.invalidate(primaryBits | secondaryBits);
-            var inheritables = addScopeLocalBindings(this, primaryBits, secondaryBits);
+            var inheritables = addScopeLocalBindings(this);
             try {
                 return op.call();
             } finally {
@@ -607,7 +612,7 @@ public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
         public final void run(Runnable op) {
             Objects.requireNonNull(op);
             Cache.invalidate(primaryBits | secondaryBits);
-            var inheritables = addScopeLocalBindings(this, primaryBits, secondaryBits);
+            var inheritables = addScopeLocalBindings(this);
             try {
                 op.run();
             } finally {
@@ -620,9 +625,15 @@ public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
         /*
          * Add a list of bindings to the current Thread's set of bound values.
          */
-        private final static Snapshot addScopeLocalBindings(Carrier bindings, short primaryBits, short secondaryBits) {
+        private final static Snapshot addScopeLocalBindings(Carrier bindings) {
             Snapshot prev = getScopeLocalBindings();
             if (bindings != null) {
+                short primaryBits = bindings.primaryBits;
+                short secondaryBits = bindings.secondaryBits;
+                if (prev != null) {
+                    primaryBits |= (short)prev.primaryBits;
+                    secondaryBits |= (short)prev.secondaryBits;
+                }
                 var b = new Snapshot(bindings, prev, primaryBits, secondaryBits);
                 ScopeLocal.setScopeLocalBindings(b);
             }
@@ -630,14 +641,11 @@ public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
         }
 
         /**
-         * Add a binding to this map, returning a new Carrier instance.
+         * Add a binding to a map, returning a new Carrier instance.
          */
         private static final <T> Carrier where(ScopeLocal<T> key, T value,
-                                                   Carrier inheritables,
-                                                   short primaryBits, short secondaryBits) {
-            primaryBits |= (short)(1 << Cache.primaryIndex(key));
-            secondaryBits |= (short)(1 << Cache.secondaryIndex(key));
-            return new Carrier(key, value, inheritables, primaryBits, secondaryBits);
+                                                   Carrier inheritables) {
+            return new Carrier(key, value, inheritables);
         }
 
         /**
@@ -656,7 +664,7 @@ public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
          * Return a new set consisting of a single binding.
          */
         static final <T> Carrier of(ScopeLocal<T> key, T value) {
-            return where(key, value, null, (short)0, (short)0);
+            return new Carrier(key, value);
         }
     }
 

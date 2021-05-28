@@ -73,7 +73,6 @@ public abstract class AbstractScopeLocal<T> {
      * @return a new Carrier list.
      */
     protected static <T> ScopeLocal.Carrier bind(AbstractScopeLocal<T> key, T value, ScopeLocal.Carrier prev) {
-        Thread thread = Thread.currentThread();
         if (prev != null) {
             return prev.where(key, value);
         } else {
