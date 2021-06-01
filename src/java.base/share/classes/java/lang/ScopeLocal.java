@@ -379,7 +379,7 @@ public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
 
     @SuppressWarnings("unchecked")
     private T slowGet() {
-        var bindings = scopeLocalBindings();
+        var bindings = getScopeLocalBindings();
         if (bindings == null)
             throw new NoSuchElementException();
         var value =  bindings.find(this);
@@ -397,7 +397,7 @@ public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
      */
     @SuppressWarnings("unchecked")
     public boolean isBound() {
-        var bindings = scopeLocalBindings();
+        var bindings = getScopeLocalBindings();
         if (bindings == null) {
             return false;
         }
@@ -408,7 +408,7 @@ public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
      * Return the value of the variable or NIL if not bound.
      */
     private Object findBinding() {
-        var bindings = scopeLocalBindings();
+        var bindings = getScopeLocalBindings();
         if (bindings != null) {
             return bindings.find(this);
         } else {
@@ -459,10 +459,6 @@ public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
 
     private static void setScopeLocalBindings(Snapshot bindings) {
         Thread.currentThread().inheritableScopeLocalBindings = bindings;
-    }
-
-    private Snapshot scopeLocalBindings() {
-        return getScopeLocalBindings();
     }
 
     private static int nextKey = 0xf0f0_f0f0;
