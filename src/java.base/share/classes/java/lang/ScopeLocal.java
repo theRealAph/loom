@@ -99,7 +99,7 @@ import static jdk.internal.javac.PreviewFeature.Feature.SCOPE_LOCALS;
  * @since 99
  */
 @jdk.internal.javac.PreviewFeature(feature=SCOPE_LOCALS)
-public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
+public class ScopeLocal<T>  {
     private final @Stable Class<? super T> type;
     private final @Stable int hash;
 
@@ -182,11 +182,11 @@ public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
         Object find(ScopeLocal<?> key) {
             for (Snapshot b = this; b != null; b = b.prev) {
                 if (((1 << Cache.primaryIndex(key)) & b.primaryBits) != 0) {
-                    for (Carrier binding = b.bindings;
-                         binding != null;
-                         binding = binding.prev) {
-                        if (binding.getKey() == key) {
-                            Object value = binding.get();
+                    for (Carrier carrier = b.bindings;
+                         carrier != null;
+                         carrier = carrier.prev) {
+                        if (carrier.getKey() == key && carrier.isValid()) {
+                            Object value = carrier.get();
                             return value;
                         }
                     }
@@ -197,23 +197,17 @@ public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
     }
 
     /**
-     * Creates a binding for a ScopeLocal instance.
+     * Add a binding for a ScopeLocal instance to the {@link Carrier} prev.
      * That {@link Carrier} may be used later to invoke a {@link Callable} or
-     * {@link Runnable} instance. More bindings may be added to the {@link Carrier}
-     * by the {@link Carrier#where(ScopeLocal, Object)} method.
+     * {@link Runnable} instance.
      *
      * @param value The value to bind it to
      * @param <T> the type of the ScopeLocal
      * @param prev the previous binding in the list
      * @return A Carrier instance that contains one binding, that of key and value
      */
-    @Override
-    protected Carrier bind(T value, Carrier prev) {
-        if (prev == null) {
-            return new Carrier(this, value);
-        } else {
-            return new Carrier(this, value, prev);
-        }
+    protected ScopeLocal.Carrier addBinding(T value, ScopeLocal.Carrier prev) {
+        return new Carrier(this, value, prev);
     }
 
     private static final class EmptySnapshot extends Snapshot {
@@ -238,7 +232,7 @@ public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
          * @param <T> the type of the ScopeLocal
          * @return A Carrier instance that contains one binding, that of key and value
          */
-        public <T> Carrier where(AbstractScopeLocal<T> key, T value) {
+        public <T> Carrier where(ScopeLocal<T> key, T value) {
             // This could be made more efficient by not creating the Carrier instance.
             return ScopeLocal.where(key, value);
         }
@@ -304,7 +298,7 @@ public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
      * @param <T> the type of the ScopeLocal
      * @return A Carrier instance that contains one binding, that of key and value
      */
-    public static <T> Carrier where(AbstractScopeLocal<T> key, T value) {
+    public static <T> Carrier where(ScopeLocal<T> key, T value) {
         return key.bind(value, null);
     }
 
@@ -319,7 +313,7 @@ public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
      * @return the result
      * @throws Exception if the operation completes with an exception
      */
-    public static <T, U> U where(AbstractScopeLocal<T> key, T value, Callable<U> op) throws Exception {
+    public static <T, U> U where(ScopeLocal<T> key, T value, Callable<U> op) throws Exception {
         return where(key, value).call(op);
     }
 
@@ -331,11 +325,16 @@ public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
      * @param <T> the type of the ScopeLocal
      * @param op the operation to run
      */
-    public static <T> void where(AbstractScopeLocal<T> key, T value, Runnable op) {
+    public static <T> void where(ScopeLocal<T> key, T value, Runnable op) {
         where(key, value).run(op);
     }
 
-    private ScopeLocal(Class<? super T> type) {
+    /**
+     * Create a new scope local given the type of its reference
+     * @param type the type of the reference. This should be the most
+     *             specific type.
+     */
+    protected ScopeLocal(Class<? super T> type) {
         this.type = Objects.requireNonNull(type);
         this.hash = generateKey();
     }
@@ -395,22 +394,23 @@ public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
      *
      * @return {@code true} if the variable is bound to a value, otherwise {@code false}
      */
-    @SuppressWarnings("unchecked")
     public boolean isBound() {
-        var bindings = getScopeLocalBindings();
-        if (bindings == null) {
-            return false;
-        }
-        return (bindings.find(this) != Snapshot.NIL);
+        return (findBinding() != Snapshot.NIL);
     }
 
     /**
      * Return the value of the variable or NIL if not bound.
      */
     private Object findBinding() {
+        Object result = Cache.get(this);
+        if (result != Snapshot.NIL) {
+            return result;
+        }
         var bindings = getScopeLocalBindings();
         if (bindings != null) {
-            return bindings.find(this);
+            result = bindings.find(this);
+            Cache.update(this, result);
+            return result;
         } else {
             return Snapshot.NIL;
         }
@@ -488,7 +488,7 @@ public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
      * @return a "snapshot" of the currently-bound inheritable scoped variables.
      */
     public static Snapshot snapshot() {
-        var result = Thread.currentThread().inheritableScopeLocalBindings;
+        var result = getScopeLocalBindings();
         return result != null ? result : EmptySnapshot.getInstance();
     }
 
@@ -523,28 +523,31 @@ public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
      * value.
      */
     @jdk.internal.javac.PreviewFeature(feature=SCOPE_LOCALS)
-    public static final class Carrier {
-        final ScopeLocal<?> key;
-        final Object value;
+    public static class Carrier {
+        private final ScopeLocal<?> key;
+        private final Object value;
         final Carrier prev;
         // Bit masks: a 1 in postion n indicates that this set of bound values
         // hits that slot in the cache
         final short primaryBits, secondaryBits;
 
-        Carrier(ScopeLocal<?> key, Object value, Carrier prev) {
+        /**
+         * Create a new carrier for key and value
+         * @param key a ScopeLocal instance
+         * @param value the bound value
+         * @param prev the previous value in the chain of where() expressions
+         */
+        protected Carrier(ScopeLocal<?> key, Object value, Carrier prev) {
             this.value = key.type.cast(value);
             this.key = key;
-            this.primaryBits = (short)((1 << Cache.primaryIndex(key)) | prev.primaryBits);
-            this.secondaryBits = (short)((1 << Cache.secondaryIndex(key)) | prev.secondaryBits);
+            if (prev != null) {
+                this.primaryBits = (short) ((1 << Cache.primaryIndex(key)) | prev.primaryBits);
+                this.secondaryBits = (short) ((1 << Cache.secondaryIndex(key)) | prev.secondaryBits);
+            } else {
+                this.primaryBits = (short) (1 << Cache.primaryIndex(key));
+                this.secondaryBits = (short) (1 << Cache.secondaryIndex(key));
+            }
             this.prev = prev;
-        }
-
-        Carrier(ScopeLocal<?> key, Object value) {
-            this.value = key.type.cast(value);
-            this.key = key;
-            this.primaryBits = (short)(1 << Cache.primaryIndex(key));
-            this.secondaryBits = (short)(1 << Cache.secondaryIndex(key));
-            this.prev = null;
         }
 
         final Object get() {
@@ -627,8 +630,8 @@ public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
                 short primaryBits = bindings.primaryBits;
                 short secondaryBits = bindings.secondaryBits;
                 if (prev != null) {
-                    primaryBits |= (short)prev.primaryBits;
-                    secondaryBits |= (short)prev.secondaryBits;
+                    primaryBits |= prev.primaryBits;
+                    secondaryBits |= prev.secondaryBits;
                 }
                 var b = new Snapshot(bindings, prev, primaryBits, secondaryBits);
                 ScopeLocal.setScopeLocalBindings(b);
@@ -652,7 +655,7 @@ public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
          * @param <T>   The type of the ScopeLocal
          * @return TBD
          */
-        public final <T> Carrier where(AbstractScopeLocal<T> key, T value) {
+        public final <T> Carrier where(ScopeLocal<T> key, T value) {
             return key.bind(value, this);
         }
 
@@ -660,7 +663,16 @@ public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
          * Return a new set consisting of a single binding.
          */
         static final <T> Carrier of(ScopeLocal<T> key, T value) {
-            return new Carrier(key, value);
+            return new Carrier(key, value, null);
+        }
+
+        /**
+         * Return true if this value valid in the current context.
+         * To be overridden by subclasses.
+         * @return validity.
+         */
+        protected boolean isValid() {
+            return true;
         }
     }
 
@@ -678,6 +690,22 @@ public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
 
         static final int secondaryIndex(ScopeLocal<?> key) {
             return (key.hash >> INDEX_BITS) & TABLE_MASK;
+        }
+
+        static Object get(ScopeLocal<?> key) {
+            Object[] objects;
+            if ((objects = Thread.scopeLocalCache()) != null) {
+                int hash = key.hashCode();
+                int n = (hash & Cache.TABLE_MASK) * 2;
+                if (objects[n] == key) {
+                    return objects[n + 1];
+                }
+                n = ((hash >>> Cache.INDEX_BITS) & Cache.TABLE_MASK) * 2;
+                if (objects[n] == key) {
+                    return objects[n + 1];
+                }
+            }
+            return Snapshot.NIL;
         }
 
         static void put(ScopeLocal<?> key, Object value) {
@@ -715,20 +743,6 @@ public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
             }
         }
 
-        private static final void remove(Object key) {
-            Object[] objects;
-            if ((objects = Thread.scopeLocalCache()) != null) {
-                int k1 = key.hashCode() & TABLE_MASK;
-                if (getKey(objects, k1) == key) {
-                    setKeyAndObjectAt(k1, null, null);
-                }
-                int k2 = (key.hashCode() >> INDEX_BITS) & TABLE_MASK;
-                if (getKey(objects, k2) == key) {
-                    setKeyAndObjectAt(k2, null, null);
-                }
-            }
-        }
-
         private static void setKeyAndObjectAt(int n, Object key, Object value) {
             Thread.scopeLocalCache()[n * 2] = key;
             Thread.scopeLocalCache()[n * 2 + 1] = value;
@@ -750,7 +764,7 @@ public final class ScopeLocal<T> extends AbstractScopeLocal<T> {
             return tmp & 1;
         }
 
-        public static void invalidate() {
+        static void invalidate() {
             Thread.setScopeLocalCache(null);
         }
 
