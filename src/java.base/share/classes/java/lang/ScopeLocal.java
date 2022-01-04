@@ -26,6 +26,9 @@
 
 package java.lang;
 
+import java.lang.invoke.MethodHandle;
+import java.lang.invoke.MethodHandles;
+import java.lang.invoke.MethodType;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.concurrent.Callable;
@@ -331,6 +334,118 @@ public final class ScopeLocal<T> {
             var b = new Snapshot(bindings, prev, primaryBits);
             ScopeLocal.setScopeLocalBindings(b);
             return prev;
+        }
+
+        static <T> void pushBindings(Carrier c) {
+            Cache.invalidate(c.primaryBits | c.secondaryBits);
+            var prevBindings = addScopeLocalBindings(c, c.primaryBits);
+        }
+
+        private static void removeBindings() {
+            var current = getScopeLocalBindings();
+            var bindings = current.bindings;
+            Cache.invalidate(bindings.primaryBits | bindings.secondaryBits);
+            Thread.currentThread().scopeLocalBindings = current.prev;
+        }
+
+        private static Object exceptionHandler(Throwable t) throws Throwable {
+            removeBindings();
+            Cache.invalidate();
+            throw t;
+        }
+
+        static <T> T filter(T t) {
+            removeBindings();
+            return t;
+        }
+
+        static boolean filter(boolean b) {
+            removeBindings();
+            return b;
+        }
+
+        static byte filter(byte b) {
+            removeBindings();
+            return b;
+        }
+
+        static short filter(short s) {
+            removeBindings();
+            return s;
+        }
+
+        static char filter(char c) {
+            removeBindings();
+            return c;
+        }
+
+        static int filter(int n) {
+            removeBindings();
+            return n;
+        }
+
+        static long filter(long l) {
+            removeBindings();
+            return l;
+        }
+
+        static float filter(float f) {
+            removeBindings();
+            return f;
+        }
+
+        static double filter(double d) {
+            removeBindings();
+            return d;
+        }
+
+        static final MethodHandles.Lookup lookup = MethodHandles.lookup();
+        static final MethodHandle PUSH_BINDINGS_MH, FILTER_MH, INT_FILTER_MH, EXCEPTION_HANDLER_MH;
+        static {
+            try {
+                PUSH_BINDINGS_MH = lookup.findStatic(Carrier.class, "pushBindings",
+                        MethodType.methodType(void.class, Carrier.class));
+                FILTER_MH = lookup.findStatic(Carrier.class, "filter",
+                        MethodType.methodType(Object.class, Object.class));
+                INT_FILTER_MH = lookup.findStatic(Carrier.class, "filter",
+                        MethodType.methodType(int.class, int.class));
+                EXCEPTION_HANDLER_MH = lookup.findStatic(Carrier.class, "exceptionHandler",
+                        MethodType.methodType(Object.class, Throwable.class));
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }
+
+        private static MethodHandle doFilter(MethodHandle last_mh, MethodHandle filter) {
+            Class<?> returnType = last_mh.type().returnType();
+            var filterType = MethodType.methodType(returnType, returnType);
+            var adaptedFilter = MethodHandles.explicitCastArguments(filter, filterType);
+            return MethodHandles.filterReturnValue(last_mh, adaptedFilter);
+        }
+
+        private static MethodHandle filter_MH(Class<?> returnType) {
+            if (returnType == Integer.TYPE) {
+                return INT_FILTER_MH;
+            } else {
+                var filterType = MethodType.methodType(returnType, returnType);
+                return MethodHandles.explicitCastArguments(FILTER_MH, filterType);
+            }
+        }
+
+        /**
+         * Foo
+         * @param handle bar
+         * @return a MethodHandle
+         */
+        public static MethodHandle mh(MethodHandle handle) {
+            MethodHandle dropCarrier = MethodHandles.dropArguments(handle, 0, Carrier.class);
+            MethodHandle foldedHandle
+                    = MethodHandles.foldArguments(dropCarrier, PUSH_BINDINGS_MH);
+            var returnType = handle.type().returnType();
+            MethodHandle result = MethodHandles.filterReturnValue(foldedHandle, filter_MH(returnType));
+            MethodHandle exceptionHandler = MethodHandles.explicitCastArguments(EXCEPTION_HANDLER_MH,
+                    MethodType.methodType(returnType, Throwable.class));
+            return MethodHandles.catchException(result, Throwable.class, exceptionHandler);
         }
 
         /*

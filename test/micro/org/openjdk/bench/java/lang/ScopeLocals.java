@@ -24,7 +24,9 @@
 
 package org.openjdk.bench.java.lang;
 
+import java.lang.invoke.*;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.*;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.Blackhole;
 
@@ -108,7 +110,7 @@ public class ScopeLocals {
     @Benchmark
     @OutputTimeUnit(TimeUnit.NANOSECONDS)
     public int bindThenGetThenRemove_ScopeLocal() throws Exception {
-        return HOLD_42.call(sl1::get);
+        return (Integer)HOLD_42.call(sl1::get);
     }
 
     @Benchmark
@@ -133,18 +135,52 @@ public class ScopeLocals {
 
     // Test 4: The cost of binding, but not using any result
 
+    AtomicReference<Object> atomicReference = new AtomicReference<>();
+    static final AtomicInteger atomicInteger = new AtomicInteger();
+
     @Benchmark
     @OutputTimeUnit(TimeUnit.NANOSECONDS)
-    public Object bind_ScopeLocal() throws Exception {
-        return ScopeLocal.where(sl1, 42, this::getClass);
+    public int int_ScopeLocal() throws Exception {
+        int n = HOLD_42.call(() -> klass(this, 1, 2, 3));
+        atomicInteger.setOpaque(n);
+        return n;
     }
 
     @Benchmark
     @OutputTimeUnit(TimeUnit.NANOSECONDS)
     public Object TWR_bind_ScopeLocal() throws Exception {
         try (var x = ScopeLocal.where(unbound, 42).bind()) {
-            return getClass();
+                return klass(this, 1, 2, 3);
         }
+    }
+
+    public static int klass(Object a, int b, int c, int d) {
+        return b+c+d;
+    }
+
+    static final MethodHandles.Lookup lookup = MethodHandles.lookup();
+    static final MethodHandle INT_MH;
+
+    static {
+        try {
+            var mh = lookup.findStatic(ScopeLocals.class, "klass",
+                                       MethodType.methodType(int.class, Object.class,
+                                                             int.class, int.class, int.class));
+            INT_MH = ScopeLocal.Carrier.mh(mh);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    int nn;
+
+    @Benchmark
+    @OutputTimeUnit(TimeUnit.NANOSECONDS)
+    public int methodHandle_bind_ScopeLocal() throws Throwable {
+        int n = (int)INT_MH.invokeExact(HOLD_42, (Object)this, 1, 2, nn);
+        atomicInteger.setOpaque(n);
+        nn += n;
+        return n;
     }
 
     @Benchmark
