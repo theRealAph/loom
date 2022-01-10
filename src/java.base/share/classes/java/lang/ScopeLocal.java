@@ -146,10 +146,10 @@ public final class ScopeLocal<T> {
 
         private static final Object NIL = new Object();
 
-        Snapshot(Carrier bindings, Snapshot prev, short primaryBits) {
+        Snapshot(Carrier bindings, Snapshot prev) {
             this.prev = prev;
             this.bindings = bindings;
-            this.primaryBits = primaryBits;
+            this.primaryBits = bindings != null ? bindings.primaryBits : 0;
         }
 
         Object find(ScopeLocal<?> key) {
@@ -176,7 +176,7 @@ public final class ScopeLocal<T> {
 
     static final class EmptySnapshot extends Snapshot {
         private EmptySnapshot() {
-            super(null, null, (short)0);
+            super(null, null);
         }
 
         private static final Snapshot SINGLETON = new EmptySnapshot();
@@ -201,23 +201,26 @@ public final class ScopeLocal<T> {
         final Object value;
         final Carrier prev;
 
-        Carrier(ScopeLocal<?> key, Object value, Carrier prev, short primaryBits, short secondaryBits) {
+        Carrier(ScopeLocal<?> key, Object value, Carrier prev) {
             this.key = key;
             this.value = value;
             this.prev = prev;
-            this.primaryBits = primaryBits;
-            this.secondaryBits = secondaryBits;
+            short primary = (short)(1 << Cache.primaryIndex(key));
+            short secondary = (short)(1 << Cache.secondaryIndex(key));
+            if (prev != null) {
+                primary |= prev.primaryBits;
+                secondary |= prev.secondaryBits;
+            }
+            this.primaryBits = primary;
+            this.secondaryBits = secondary;
         }
 
         /**
          * Add a binding to this map, returning a new Carrier instance.
          */
         private static final <T> Carrier where(ScopeLocal<T> key, T value,
-                                               Carrier prev,
-                                               short primaryBits, short secondaryBits) {
-            primaryBits |= (short)(1 << Cache.primaryIndex(key));
-            secondaryBits |= (short)(1 << Cache.secondaryIndex(key));
-            return new Carrier(key, value, prev, primaryBits, secondaryBits);
+                                               Carrier prev) {
+            return new Carrier(key, value, prev);
         }
 
         /**
@@ -229,14 +232,14 @@ public final class ScopeLocal<T> {
          * @return A new map, consisting of {@code this}. plus a new binding. {@code this} is unchanged.
          */
         public final <T> Carrier where(ScopeLocal<T> key, T value) {
-            return where(key, value, this, primaryBits, secondaryBits);
+            return where(key, value, this);
         }
 
         /*
          * Return a new set consisting of a single binding.
          */
         static final <T> Carrier of(ScopeLocal<T> key, T value) {
-            return where(key, value, null, (short)0, (short)0);
+            return where(key, value, null);
         }
 
         final Object get() {
@@ -287,7 +290,7 @@ public final class ScopeLocal<T> {
         public final <R> R call(Callable<R> op) throws Exception {
             Objects.requireNonNull(op);
             Cache.invalidate(primaryBits | secondaryBits);
-            var prevBindings = addScopeLocalBindings(this, primaryBits);
+            var prevBindings = addScopeLocalBindings(this);
             try {
                 return ScopeLocalContainer.call(op);
             } catch (Throwable t) {
@@ -336,7 +339,7 @@ public final class ScopeLocal<T> {
         public final void run(Runnable op) {
             Objects.requireNonNull(op);
             Cache.invalidate(primaryBits | secondaryBits);
-            var prevBindings = addScopeLocalBindings(this, primaryBits);
+            var prevBindings = addScopeLocalBindings(this);
             try {
                 ScopeLocalContainer.run(op);
             } catch (Throwable t) {
@@ -351,9 +354,9 @@ public final class ScopeLocal<T> {
         /*
          * Add a list of bindings to the current Thread's set of bound values.
          */
-        private static final Snapshot addScopeLocalBindings(Carrier bindings, short primaryBits) {
+        private static final Snapshot addScopeLocalBindings(Carrier bindings) {
             Snapshot prev = getScopeLocalBindings();
-            var b = new Snapshot(bindings, prev, primaryBits);
+            var b = new Snapshot(bindings, prev);
             ScopeLocal.setScopeLocalBindings(b);
             return prev;
         }
