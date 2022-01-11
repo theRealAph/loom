@@ -142,29 +142,33 @@ public final class ScopeLocal<T> {
     static class Snapshot {
         final Snapshot prev;
         final Carrier bindings;
-        final short primaryBits;
+        final int bitmask;
 
         private static final Object NIL = new Object();
 
         Snapshot(Carrier bindings, Snapshot prev) {
             this.prev = prev;
             this.bindings = bindings;
-            this.primaryBits = bindings != null ? bindings.primaryBits : 0;
+            this.bitmask = bindings.bitmask | prev.bitmask;
+        }
+
+        protected Snapshot() {
+            this.prev = null;
+            this.bindings = null;
+            this.bitmask = 0;
         }
 
         Object find(ScopeLocal<?> key) {
-            for (Snapshot b = this; b != null; b = b.prev) {
-                if (((1 << Cache.primaryIndex(key)) & b.primaryBits) != 0) {
-                    if (b.getClass() != Snapshot.class) {
-                        return b.find(key);
-                    }
-                    for (Carrier binding = b.bindings;
-                         binding != null;
-                         binding = binding.prev) {
-                        if (binding.getKey() == key) {
-                            Object value = binding.get();
-                            return value;
-                        }
+            int bits = key.bitmask();
+            for (Snapshot snapshot = this;
+                 maybePresent(bitmask, bits);
+                 snapshot = snapshot.prev) {
+                for (Carrier carrier = snapshot.bindings;
+                     carrier != null && maybePresent(carrier.bitmask, bits);
+                     carrier = carrier.prev) {
+                    if (carrier.getKey() == key) {
+                        Object value = carrier.get();
+                        return value;
                     }
                 }
             }
@@ -172,11 +176,10 @@ public final class ScopeLocal<T> {
         }
     }
 
-
-
     static final class EmptySnapshot extends Snapshot {
-        private EmptySnapshot() {
-            super(null, null);
+
+        EmptySnapshot() {
+            super();
         }
 
         private static final Snapshot SINGLETON = new EmptySnapshot();
@@ -196,7 +199,7 @@ public final class ScopeLocal<T> {
     public static final class Carrier {
         // Bit masks: a 1 in postion n indicates that this set of bound values
         // hits that slot in the cache
-        final short primaryBits, secondaryBits;
+        final int bitmask;
         final ScopeLocal<?> key;
         final Object value;
         final Carrier prev;
@@ -205,14 +208,11 @@ public final class ScopeLocal<T> {
             this.key = key;
             this.value = value;
             this.prev = prev;
-            short primary = (short)(1 << Cache.primaryIndex(key));
-            short secondary = (short)(1 << Cache.secondaryIndex(key));
+            int bits = key.bitmask();
             if (prev != null) {
-                primary |= prev.primaryBits;
-                secondary |= prev.secondaryBits;
+                bits |= prev.bitmask;
             }
-            this.primaryBits = primary;
-            this.secondaryBits = secondary;
+            this.bitmask = bits;
         }
 
         /**
@@ -260,10 +260,12 @@ public final class ScopeLocal<T> {
          */
         @SuppressWarnings("unchecked")
         public final <T> T get(ScopeLocal<T> key) {
-            for (Carrier b = this;
-                 b != null; b = b.prev) {
-                if (b.getKey() == key) {
-                    Object value = b.get();
+            var bits = key.bitmask();
+            for (Carrier carrier = this;
+                 carrier != null && maybePresent(carrier.bitmask, bits);
+                 carrier = carrier.prev) {
+                if (carrier.getKey() == key) {
+                    Object value = carrier.get();
                     return (T)value;
                 }
             }
@@ -289,7 +291,7 @@ public final class ScopeLocal<T> {
          */
         public final <R> R call(Callable<R> op) throws Exception {
             Objects.requireNonNull(op);
-            Cache.invalidate(primaryBits | secondaryBits);
+            Cache.invalidate(bitmask);
             var prevBindings = addScopeLocalBindings(this);
             try {
                 return ScopeLocalContainer.call(op);
@@ -298,7 +300,7 @@ public final class ScopeLocal<T> {
                 throw t;
             } finally {
                 Thread.currentThread().scopeLocalBindings = prevBindings;
-                Cache.invalidate(primaryBits | secondaryBits);
+                Cache.invalidate(bitmask);
             }
         }
 
@@ -338,7 +340,7 @@ public final class ScopeLocal<T> {
          */
         public final void run(Runnable op) {
             Objects.requireNonNull(op);
-            Cache.invalidate(primaryBits | secondaryBits);
+            Cache.invalidate(bitmask);
             var prevBindings = addScopeLocalBindings(this);
             try {
                 ScopeLocalContainer.run(op);
@@ -347,7 +349,7 @@ public final class ScopeLocal<T> {
                 throw t;
             } finally {
                 Thread.currentThread().scopeLocalBindings = prevBindings;
-                Cache.invalidate(primaryBits | secondaryBits);
+                Cache.invalidate(bitmask);
             }
         }
 
@@ -391,15 +393,15 @@ public final class ScopeLocal<T> {
     static final class BinderImpl
             extends ScopeLocalContainer implements ScopeLocal.Binder {
         final Carrier bindings;
-        final short primaryBits;
+        final int bitmask;
         final BinderImpl prevBinder;
         private boolean closed;
 
         BinderImpl(Carrier bindings) {
             this.bindings = bindings;
             this.prevBinder = innermostBinder();
-            this.primaryBits = (short)(bindings.primaryBits
-                    | (prevBinder == null ? 0 : prevBinder.primaryBits));
+            this.bitmask = bindings.bitmask
+                    | (prevBinder == null ? 0 : prevBinder.bitmask);
         }
 
         static BinderImpl innermostBinder() {
@@ -422,7 +424,7 @@ public final class ScopeLocal<T> {
                 throw new WrongThreadException();
             if (!closed) {
                 closed = true;
-                Cache.invalidate(bindings.primaryBits | bindings.secondaryBits);
+                Cache.invalidate(bindings.bitmask);
                 if (!popForcefully()) {
                     Cache.invalidate();
                     throw new StructureViolationException();
@@ -434,7 +436,7 @@ public final class ScopeLocal<T> {
             assert Thread.currentThread() == owner();
             if (!closed) {
                 closed = true;
-                Cache.invalidate(bindings.primaryBits | bindings.secondaryBits);
+                Cache.invalidate(bindings.bitmask);
                 return true;
             } else {
                 assert false : "Should not get there";
@@ -443,15 +445,16 @@ public final class ScopeLocal<T> {
         }
 
         static Object find(ScopeLocal<?> key) {
-            for (BinderImpl b = innermostBinder(); b != null; b = b.prevBinder) {
-                if (((1 << Cache.primaryIndex(key)) & b.primaryBits) != 0) {
-                    for (Carrier binding = b.bindings;
-                         binding != null;
-                         binding = binding.prev) {
-                        if (binding.getKey() == key) {
-                            Object value = binding.get();
-                            return value;
-                        }
+            int bits = key.bitmask();
+            for (BinderImpl b = innermostBinder();
+                 b != null && maybePresent(b.bitmask, bits);
+                 b = b.prevBinder) {
+                for (Carrier carrier = b.bindings;
+                     carrier != null && maybePresent(carrier.bitmask, bits);
+                     carrier = carrier.prev) {
+                    if (carrier.getKey() == key) {
+                        Object value = carrier.get();
+                        return value;
                     }
                 }
             }
@@ -651,6 +654,21 @@ public final class ScopeLocal<T> {
         return (nextKey = x);
     }
 
+    /**
+     * Return a bit mask that may be used to determine if this ScopeLocal is
+     * bound in the current context. Each Carrier holds a bit mask which is
+     * the OR of all the bit masks of the bound ScopeLocals.
+     * @return the bitmask
+     */
+    int bitmask() {
+        return (1 << Cache.primaryIndex(this)) | (1 << (Cache.secondaryIndex(this) + Cache.TABLE_SIZE));
+    }
+
+    // Return true iff all of the set bits in targetBits is also set in bitmask.
+    static boolean maybePresent(int bitmask, int targetBits) {
+        return (bitmask & targetBits) == targetBits;
+    }
+
     // A small fixed-size key-value cache. When a scope scope local's get() method
     // is invoked, we record the result of the lookup in this per-thread cache
     // for fast access in future.
@@ -658,6 +676,7 @@ public final class ScopeLocal<T> {
         static final int INDEX_BITS = 4;  // Must be a power of 2
         static final int TABLE_SIZE = 1 << INDEX_BITS;
         static final int TABLE_MASK = TABLE_SIZE - 1;
+        static final int PRIMARY_MASK = (1 << TABLE_SIZE) - 1;
 
         static final int primaryIndex(ScopeLocal<?> key) {
             return key.hash & TABLE_MASK;
@@ -748,10 +767,10 @@ public final class ScopeLocal<T> {
 
         // Null a set of cache entries, indicated by the 1-bits given
         static void invalidate(int toClearBits) {
-            assert(toClearBits == (short)toClearBits);
+            toClearBits = (toClearBits >>> TABLE_SIZE) | (toClearBits & PRIMARY_MASK);
             Object[] objects;
             if ((objects = Thread.scopeLocalCache()) != null) {
-                for (short bits = (short)toClearBits; bits != 0; ) {
+                for (int bits = toClearBits; bits != 0; ) {
                     int index = Integer.numberOfTrailingZeros(bits);
                     setKeyAndObjectAt(index, null, null);
                     bits &= ~1 << index;
