@@ -34,6 +34,7 @@ import java.util.function.Supplier;
 
 import jdk.internal.javac.PreviewFeature;
 import jdk.internal.vm.ScopeLocalContainer;
+import jdk.internal.vm.annotation.DontInline;
 import jdk.internal.vm.annotation.ForceInline;
 import jdk.internal.vm.annotation.ReservedStackAccess;
 import jdk.internal.vm.annotation.Stable;
@@ -316,7 +317,7 @@ public final class ScopeLocal<T> {
             try {
                 return ScopeLocalContainer.call(op);
             } catch (Throwable t) {
-                Cache.invalidate();
+                Thread.setScopeLocalCache(null); // Cache.invalidate();
                 throw t;
             } finally {
                 Thread.currentThread().scopeLocalBindings = prevBindings;
@@ -365,7 +366,7 @@ public final class ScopeLocal<T> {
             try {
                 ScopeLocalContainer.run(op);
             } catch (Throwable t) {
-                Cache.invalidate();
+                Thread.setScopeLocalCache(null); // Cache.invalidate();
                 throw t;
             } finally {
                 Thread.currentThread().scopeLocalBindings = prevBindings;
@@ -453,12 +454,13 @@ public final class ScopeLocal<T> {
             if (Thread.currentThread() != owner())
                 throw new WrongThreadException();
             if (!closed) {
-                closed = true;
                 Cache.invalidate(bindings.bitmask);
                 if (!popForcefully()) {
-                    Cache.invalidate();
+                    closed = true;
+                    Thread.setScopeLocalCache(null); // Cache.invalidate();
                     throw new StructureViolationException();
                 }
+                closed = true;
             }
         }
 
@@ -828,13 +830,12 @@ public final class ScopeLocal<T> {
             return (tmp & 15) >= 5;
         }
 
-        @ReservedStackAccess
+        @DontInline @ReservedStackAccess
         public static void invalidate() {
             Thread.setScopeLocalCache(null);
         }
 
         // Null a set of cache entries, indicated by the 1-bits given
-        @ReservedStackAccess
         static void invalidate(int toClearBits) {
             toClearBits = ((toClearBits >>> TABLE_SIZE) | toClearBits) & PRIMARY_MASK;
             Object[] objects;

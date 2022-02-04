@@ -2466,6 +2466,7 @@ class PrintAndVerifyOopClosure: public OopClosure {
 #ifdef ASSERT
 // Print or validate the layout of stack frames
 void JavaThread::print_frame_layout(int depth, bool validate_only) {
+  if (depth == 0)  depth = 75;
   ResourceMark rm;
   PreserveExceptionMark pm(this);
   FrameValues values;

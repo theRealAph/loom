@@ -3344,7 +3344,8 @@ frame SharedRuntime::look_for_reserved_stack_annotated_method(JavaThread* curren
 
     Method* method = NULL;
     bool found = false;
-    if (fr.is_interpreted_frame()) {
+    bool interpreted_frame = fr.is_interpreted_frame();
+    if (interpreted_frame) {
       method = fr.interpreter_frame_method();
       if (method != NULL && method->has_reserved_stack_access()) {
         found = true;
@@ -3366,9 +3367,10 @@ frame SharedRuntime::look_for_reserved_stack_annotated_method(JavaThread* curren
     }
     if (found) {
       activation = fr;
-      warning("Potentially dangerous stack overflow in "
+      const char *kind = interpreted_frame ? "interpreted" : "JIT-compiled";
+      warning("Potentially dangerous stack overflow in %s "
               "ReservedStackAccess annotated method %s [%d]",
-              method->name_and_sig_as_C_string(), count++);
+              kind, method->name_and_sig_as_C_string(), count++);
       EventReservedStackActivation event;
       if (event.should_commit()) {
         event.set_method(method);
