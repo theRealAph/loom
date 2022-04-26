@@ -553,16 +553,15 @@ public final class ExtentLocal<T> {
 
     // A Marsaglia xor-shift generator used to generate hashes. This one has full period, so
     // it generates 2**32 - 1 hashes before it repeats. We're going to use the lowest n bits
-    // and the next n bits as cache indexes, so we make sure that those indexes are
-    // different.
+    // and the next n bits as cache indexes, so we make sure that those indexes map
+    // to different slots in the cache.
     private static synchronized int generateKey() {
         int x = nextKey;
         do {
             x ^= x >>> 12;
             x ^= x << 9;
             x ^= x >>> 23;
-        } while ((x & ExtentLocal.CACHE_MASK)
-                == ((x >>> Cache.INDEX_BITS) & ExtentLocal.CACHE_MASK));
+        } while (Cache.primarySlot(x) == Cache.secondarySlot(x));
         return (nextKey = x);
     }
 
@@ -599,49 +598,64 @@ public final class ExtentLocal<T> {
             return (key.hash >> INDEX_BITS) & TABLE_MASK;
         }
 
+        private static final int primarySlot(ExtentLocal<?> key) {
+            return key.hashCode() & CACHE_MASK;
+        }
+
+        private static final int secondarySlot(ExtentLocal<?> key) {
+            return (key.hash >> INDEX_BITS) & CACHE_MASK;
+        }
+
+        static final int primarySlot(int hash) {
+            return hash & CACHE_MASK;
+        }
+
+        static final int secondarySlot(int hash) {
+            return (hash >> INDEX_BITS) & CACHE_MASK;
+        }
+
         static void put(ExtentLocal<?> key, Object value) {
             Object[] theCache = extentLocalCache();
             if (theCache == null) {
-                final var tableSize = ExtentLocal.CACHE_LIMIT;
-                theCache = new Object[tableSize * 2];
+                theCache = new Object[CACHE_LIMIT * 2];
                 setExtentLocalCache(theCache);
             }
             // Update the cache to replace one entry with the value we just looked up.
             // Each value can be in one of two possible places in the cache.
             // Pick a victim at (pseudo-)random.
-            int k1 = primaryIndex(key) & ExtentLocal.CACHE_MASK;
-            int k2 = secondaryIndex(key) & ExtentLocal.CACHE_MASK;
+            int k1 = primarySlot(key);
+            int k2 = secondarySlot(key);
             var usePrimaryIndex = chooseVictim();
             int victim = usePrimaryIndex ? k1 : k2;
             int other = usePrimaryIndex ? k2 : k1;
             setKeyAndObjectAt(victim, key, value);
             if (getKey(theCache, other) == key) {
-                setObjectAt(other, value);
+                setKeyAndObjectAt(other, key, value);
             }
         }
 
-        private static final void update(Object key, Object value) {
+        private static final void update(ExtentLocal<?> key, Object value) {
             Object[] objects;
             if ((objects = extentLocalCache()) != null) {
-                int k1 = key.hashCode() & TABLE_MASK;
+                int k1 = Cache.primarySlot(key);
                 if (getKey(objects, k1) == key) {
-                    setObjectAt(k1, value);
+                    setKeyAndObjectAt(k1, key, value);
                 }
-                int k2 = (key.hashCode() >> INDEX_BITS) & TABLE_MASK;
+                int k2 = Cache.secondarySlot(key);
                 if (getKey(objects, k2) == key) {
-                    setObjectAt(k2, value);
+                    setKeyAndObjectAt(k2, key, value);
                 }
             }
         }
 
-        private static final void remove(Object key) {
+        private static final void remove(ExtentLocal<?> key) {
             Object[] objects;
             if ((objects = extentLocalCache()) != null) {
-                int k1 = key.hashCode() & TABLE_MASK;
+                int k1 = Cache.primarySlot(key);
                 if (getKey(objects, k1) == key) {
                     setKeyAndObjectAt(k1, null, null);
                 }
-                int k2 = (key.hashCode() >> INDEX_BITS) & TABLE_MASK;
+                int k2 = Cache.primarySlot(key);
                 if (getKey(objects, k2) == key) {
                     setKeyAndObjectAt(k2, null, null);
                 }
@@ -649,20 +663,16 @@ public final class ExtentLocal<T> {
         }
 
         private static void setKeyAndObjectAt(int n, Object key, Object value) {
-            extentLocalCache()[(n & ExtentLocal.CACHE_MASK) * 2] = key;
-            extentLocalCache()[(n & ExtentLocal.CACHE_MASK) * 2 + 1] = value;
-        }
-
-        private static void setObjectAt(int n, Object value) {
-            extentLocalCache()[(n & ExtentLocal.CACHE_MASK) * 2 + 1] = value;
+            extentLocalCache()[n * 2] = key;
+            extentLocalCache()[n * 2 + 1] = value;
         }
 
         private static Object getKey(Object[] objs, int n) {
-            return objs[(n & ExtentLocal.CACHE_MASK) * 2];
+            return objs[n * 2];
         }
 
         private static void setKey(Object[] objs, int n, Object key) {
-            objs[(n & ExtentLocal.CACHE_MASK) * 2 + 1] = key;
+            objs[n * 2] = key;
         }
 
         private static final JavaUtilConcurrentTLRAccess THREAD_LOCAL_RANDOM_ACCESS
