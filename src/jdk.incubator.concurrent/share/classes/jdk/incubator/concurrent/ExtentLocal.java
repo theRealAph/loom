@@ -109,9 +109,28 @@ import jdk.internal.vm.annotation.Stable;
 public final class ExtentLocal<T> {
     private static final JavaLangAccess JLA = SharedSecrets.getJavaLangAccess();
 
+    private static final int CACHE_LIMIT, CACHE_MASK;
+    private static final int MAX_CACHE_SIZE = 16;
+
     private final @Stable int hash;
 
     public final int hashCode() { return hash; }
+
+    static {
+        final String propertyName = "jdk.incubator.concurrent.ExtentLocal.cacheSize";
+        var sizeString = System.getProperty(propertyName, "16");
+        var cacheSize = Integer.valueOf(sizeString);
+        if (cacheSize < 2 || cacheSize > MAX_CACHE_SIZE) {
+            cacheSize = MAX_CACHE_SIZE;
+            System.err.println(propertyName + " is out of range: is " + sizeString);
+        }
+        if ((cacheSize & (cacheSize - 1)) != 0) {  // a power of 1
+            cacheSize = MAX_CACHE_SIZE;
+            System.err.println(propertyName + " must be an integer power of 2: is " + sizeString);
+        }
+        CACHE_LIMIT = cacheSize;
+        CACHE_MASK = cacheSize - 1;
+    }
 
     /**
      * An immutable map from {@code ExtentLocal} to values.
@@ -424,11 +443,11 @@ public final class ExtentLocal<T> {
             // This code should perhaps be in class Cache. We do it
             // here because the generated code is small and fast and
             // we really want it to be inlined in the caller.
-            int n = (hash & Cache.TABLE_MASK) * 2;
+            int n = (hash & CACHE_MASK) * 2;
             if (objects[n] == this) {
                 return (T)objects[n + 1];
             }
-            n = ((hash >>> Cache.INDEX_BITS) & Cache.TABLE_MASK) * 2;
+            n = ((hash >>> Cache.INDEX_BITS) & CACHE_MASK) * 2;
             if (objects[n] == this) {
                 return (T)objects[n + 1];
             }
@@ -542,8 +561,8 @@ public final class ExtentLocal<T> {
             x ^= x >>> 12;
             x ^= x << 9;
             x ^= x >>> 23;
-        } while ((x & Cache.TABLE_MASK)
-                == ((x >>> Cache.INDEX_BITS) & Cache.TABLE_MASK));
+        } while ((x & ExtentLocal.CACHE_MASK)
+                == ((x >>> Cache.INDEX_BITS) & ExtentLocal.CACHE_MASK));
         return (nextKey = x);
     }
 
@@ -583,20 +602,21 @@ public final class ExtentLocal<T> {
         static void put(ExtentLocal<?> key, Object value) {
             Object[] theCache = extentLocalCache();
             if (theCache == null) {
-                theCache = new Object[TABLE_SIZE * 2];
+                final var tableSize = ExtentLocal.CACHE_LIMIT;
+                theCache = new Object[tableSize * 2];
                 setExtentLocalCache(theCache);
             }
             // Update the cache to replace one entry with the value we just looked up.
             // Each value can be in one of two possible places in the cache.
             // Pick a victim at (pseudo-)random.
-            int k1 = primaryIndex(key);
-            int k2 = secondaryIndex(key);
+            int k1 = primaryIndex(key) & ExtentLocal.CACHE_MASK;
+            int k2 = secondaryIndex(key) & ExtentLocal.CACHE_MASK;
             var usePrimaryIndex = chooseVictim();
             int victim = usePrimaryIndex ? k1 : k2;
             int other = usePrimaryIndex ? k2 : k1;
             setKeyAndObjectAt(victim, key, value);
             if (getKey(theCache, other) == key) {
-                setKey(theCache, other, null);
+                setObjectAt(other, value);
             }
         }
 
@@ -605,11 +625,11 @@ public final class ExtentLocal<T> {
             if ((objects = extentLocalCache()) != null) {
                 int k1 = key.hashCode() & TABLE_MASK;
                 if (getKey(objects, k1) == key) {
-                    setKeyAndObjectAt(k1, key, value);
+                    setObjectAt(k1, value);
                 }
                 int k2 = (key.hashCode() >> INDEX_BITS) & TABLE_MASK;
                 if (getKey(objects, k2) == key) {
-                    setKeyAndObjectAt(k2, key, value);
+                    setObjectAt(k2, value);
                 }
             }
         }
@@ -629,16 +649,20 @@ public final class ExtentLocal<T> {
         }
 
         private static void setKeyAndObjectAt(int n, Object key, Object value) {
-            extentLocalCache()[n * 2] = key;
-            extentLocalCache()[n * 2 + 1] = value;
+            extentLocalCache()[(n & ExtentLocal.CACHE_MASK) * 2] = key;
+            extentLocalCache()[(n & ExtentLocal.CACHE_MASK) * 2 + 1] = value;
+        }
+
+        private static void setObjectAt(int n, Object value) {
+            extentLocalCache()[(n & ExtentLocal.CACHE_MASK) * 2 + 1] = value;
         }
 
         private static Object getKey(Object[] objs, int n) {
-            return objs[n * 2];
+            return objs[(n & ExtentLocal.CACHE_MASK) * 2];
         }
 
         private static void setKey(Object[] objs, int n, Object key) {
-            objs[n * 2] = key;
+            objs[(n & ExtentLocal.CACHE_MASK) * 2 + 1] = key;
         }
 
         private static final JavaUtilConcurrentTLRAccess THREAD_LOCAL_RANDOM_ACCESS
