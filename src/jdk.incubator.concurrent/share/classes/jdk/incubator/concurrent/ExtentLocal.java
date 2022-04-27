@@ -40,6 +40,7 @@ import jdk.internal.vm.annotation.DontInline;
 import jdk.internal.vm.annotation.ForceInline;
 import jdk.internal.vm.annotation.ReservedStackAccess;
 import jdk.internal.vm.annotation.Stable;
+import sun.security.action.GetPropertyAction;
 
 /**
  * Represents a scoped value.
@@ -109,28 +110,9 @@ import jdk.internal.vm.annotation.Stable;
 public final class ExtentLocal<T> {
     private static final JavaLangAccess JLA = SharedSecrets.getJavaLangAccess();
 
-    private static final int CACHE_LIMIT, CACHE_MASK;
-    private static final int MAX_CACHE_SIZE = 16;
-
     private final @Stable int hash;
 
     public final int hashCode() { return hash; }
-
-    static {
-        final String propertyName = "jdk.incubator.concurrent.ExtentLocal.cacheSize";
-        var sizeString = System.getProperty(propertyName, "16");
-        var cacheSize = Integer.valueOf(sizeString);
-        if (cacheSize < 2 || cacheSize > MAX_CACHE_SIZE) {
-            cacheSize = MAX_CACHE_SIZE;
-            System.err.println(propertyName + " is out of range: is " + sizeString);
-        }
-        if ((cacheSize & (cacheSize - 1)) != 0) {  // a power of 1
-            cacheSize = MAX_CACHE_SIZE;
-            System.err.println(propertyName + " must be an integer power of 2: is " + sizeString);
-        }
-        CACHE_LIMIT = cacheSize;
-        CACHE_MASK = cacheSize - 1;
-    }
 
     /**
      * An immutable map from {@code ExtentLocal} to values.
@@ -443,11 +425,11 @@ public final class ExtentLocal<T> {
             // This code should perhaps be in class Cache. We do it
             // here because the generated code is small and fast and
             // we really want it to be inlined in the caller.
-            int n = (hash & CACHE_MASK) * 2;
+            int n = (hash & Cache.SLOT_MASK) * 2;
             if (objects[n] == this) {
                 return (T)objects[n + 1];
             }
-            n = ((hash >>> Cache.INDEX_BITS) & CACHE_MASK) * 2;
+            n = ((hash >>> Cache.INDEX_BITS) & Cache.SLOT_MASK) * 2;
             if (objects[n] == this) {
                 return (T)objects[n + 1];
             }
@@ -590,6 +572,29 @@ public final class ExtentLocal<T> {
         static final int TABLE_MASK = TABLE_SIZE - 1;
         static final int PRIMARY_MASK = (1 << TABLE_SIZE) - 1;
 
+        // The number of elements in the cache array, and a bit mask used to
+        // select elements from it.
+        private static final int CACHE_TABLE_SIZE, SLOT_MASK;
+        // The largest cache we allow. Must be a power of 2 and greater than
+        // or equal to 2.
+        private static final int MAX_CACHE_SIZE = 16;
+
+        static {
+            final String propertyName = "jdk.incubator.concurrent.ExtentLocal.cacheSize";
+            var sizeString = GetPropertyAction.privilegedGetProperty(propertyName, "16");
+            var cacheSize = Integer.valueOf(sizeString);
+            if (cacheSize < 2 || cacheSize > MAX_CACHE_SIZE) {
+                cacheSize = MAX_CACHE_SIZE;
+                System.err.println(propertyName + " is out of range: is " + sizeString);
+            }
+            if ((cacheSize & (cacheSize - 1)) != 0) {  // a power of 2
+                cacheSize = MAX_CACHE_SIZE;
+                System.err.println(propertyName + " must be an integer power of 2: is " + sizeString);
+            }
+            CACHE_TABLE_SIZE = cacheSize;
+            SLOT_MASK = cacheSize - 1;
+        }
+
         static final int primaryIndex(ExtentLocal<?> key) {
             return key.hash & TABLE_MASK;
         }
@@ -599,25 +604,25 @@ public final class ExtentLocal<T> {
         }
 
         private static final int primarySlot(ExtentLocal<?> key) {
-            return key.hashCode() & CACHE_MASK;
+            return key.hashCode() & SLOT_MASK;
         }
 
         private static final int secondarySlot(ExtentLocal<?> key) {
-            return (key.hash >> INDEX_BITS) & CACHE_MASK;
+            return (key.hash >> INDEX_BITS) & SLOT_MASK;
         }
 
         static final int primarySlot(int hash) {
-            return hash & CACHE_MASK;
+            return hash & SLOT_MASK;
         }
 
         static final int secondarySlot(int hash) {
-            return (hash >> INDEX_BITS) & CACHE_MASK;
+            return (hash >> INDEX_BITS) & SLOT_MASK;
         }
 
         static void put(ExtentLocal<?> key, Object value) {
             Object[] theCache = extentLocalCache();
             if (theCache == null) {
-                theCache = new Object[CACHE_LIMIT * 2];
+                theCache = new Object[CACHE_TABLE_SIZE * 2];
                 setExtentLocalCache(theCache);
             }
             // Update the cache to replace one entry with the value we just looked up.
@@ -663,8 +668,9 @@ public final class ExtentLocal<T> {
         }
 
         private static void setKeyAndObjectAt(int n, Object key, Object value) {
-            extentLocalCache()[n * 2] = key;
-            extentLocalCache()[n * 2 + 1] = value;
+            var cache = extentLocalCache();
+            cache[n * 2] = key;
+            cache[n * 2 + 1] = value;
         }
 
         private static Object getKey(Object[] objs, int n) {
@@ -700,7 +706,7 @@ public final class ExtentLocal<T> {
             if ((objects = extentLocalCache()) != null) {
                 for (int bits = toClearBits; bits != 0; ) {
                     int index = Integer.numberOfTrailingZeros(bits);
-                    setKeyAndObjectAt(index, null, null);
+                    setKeyAndObjectAt(index & SLOT_MASK, null, null);
                     bits &= ~1 << index;
                 }
             }
