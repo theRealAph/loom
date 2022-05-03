@@ -132,7 +132,7 @@ import sun.security.action.GetPropertyAction;
  * <p>For example, you could use {@code -Djdk.incubator.concurrent.ExtentLocal.cacheSize=8}.
  *
 
- * <p>The other system property is {@code jdk.preserveExtentLocalCache}
+ * <p>The other system property is {@code jdk.preserveExtentLocalCache}.
  * This property determines whether the per-thread extent-local
  * cache is preserved when a virtual thread is blocked. By default
  * this property is set to {@code true}, meaning that every virtual
@@ -293,8 +293,8 @@ public final class ExtentLocal<T> {
         }
 
         /**
-         * Run a value-returning operation with some ExtentLocals bound to values.
-         * Code executed by the operation can use the {@link #get()} method to
+         * Run a value-returning operation with some extent-local variables bound to values.
+         * Code invoked by {@code op} can use the {@link #get()} method to
          * get the value of the extent local. The extent locals revert to their previous values or
          * become {@linkplain #isBound() unbound} when the operation completes.
          *
@@ -327,7 +327,7 @@ public final class ExtentLocal<T> {
         /**
          * Run a value-returning operation with this set of ExtentLocals bound to values,
          * in the same way as {@code call()}.<p>
-         *     If the operation throws an exception, pass it as a single argument to the {@link Function}
+         *     If {@code op} throws an exception, pass it as a single argument to the {@link Function}
          *     {@code handler}. {@code handler} must return a value compatible with the type returned by {@code op}.
          * </p>
          * @param op    the operation to run
@@ -411,8 +411,8 @@ public final class ExtentLocal<T> {
     }
 
     /**
-     * Creates a binding for a ExtentLocal instance and runs a value-returning
-     * operation with that bound ExtentLocal.
+     * Creates a binding for an extent-local variable and runs a
+     * value-returning operation with that ExtentLocal bound.
      * @param key the ExtentLocal to bind
      * @param value The value to bind it to
      * @param <T> the type of the ExtentLocal
