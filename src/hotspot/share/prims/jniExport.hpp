@@ -26,12 +26,14 @@
 #define SHARE_PRIMS_JNIEXPORT_HPP
 
 #include "jni.h"
+#include "runtime/arguments.hpp"
 #include "prims/jvmtiExport.hpp"
 
 class JniExportedInterface {
  public:
   static bool GetExportedInterface(JavaVM* vm, void** penv, jint version, jint* iface) {
-    if (JvmtiExport::is_jvmti_version(version)) {
+    // no JVMTI if --enable-preview and no continuations support
+    if (JvmtiExport::is_jvmti_version(version) && (VMContinuations || !Arguments::enable_preview())) {
       *iface = JvmtiExport::get_jvmti_interface(vm, penv, version);
       return true;
     }

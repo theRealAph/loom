@@ -65,6 +65,7 @@
   template(java_lang_Thread_FieldHolder,              "java/lang/Thread$FieldHolder")             \
   template(java_lang_Thread_Constants,                "java/lang/Thread$Constants")               \
   template(java_lang_ThreadGroup,                     "java/lang/ThreadGroup")                    \
+  template(java_lang_BaseVirtualThread,               "java/lang/BaseVirtualThread")              \
   template(java_lang_VirtualThread,                   "java/lang/VirtualThread")                  \
   template(java_lang_Cloneable,                       "java/lang/Cloneable")                      \
   template(java_lang_Throwable,                       "java/lang/Throwable")                      \
@@ -370,7 +371,7 @@
   template(jdk_internal_foreign_abi_VMStorage_signature,             "Ljdk/internal/foreign/abi/VMStorage;") \
   template(jdk_internal_foreign_abi_VMStorage_array_signature,       "[Ljdk/internal/foreign/abi/VMStorage;") \
   template(jdk_internal_foreign_abi_VMStorage_array_array_signature, "[[Ljdk/internal/foreign/abi/VMStorage;") \
-  template(jdk_internal_foreign_abi_CallConv,                        "jdk/internal/foreign/abi/ProgrammableUpcallHandler$CallRegs") \
+  template(jdk_internal_foreign_abi_CallConv,                        "jdk/internal/foreign/abi/UpcallLinker$CallRegs") \
                                                                                                   \
   /* Support for JVMCI */                                                                         \
   JVMCI_VM_SYMBOLS_DO(template, do_alias)                                                         \
