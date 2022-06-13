@@ -823,6 +823,23 @@ void JavaThread::set_extentLocalCache(oop p) {
   _extentLocalCache.replace(p);
 }
 
+void JavaThread::runWithExtentLocalBindings(jobject thread, jobject bindings, jobject runnable) {
+  JavaValue result(T_VOID);
+  InstanceKlass* ik = vmClasses::Thread_klass();
+  assert(ik->is_initialized(), "must be");
+  oop thread_oop = JNIHandles::resolve_non_null(thread);
+  oop the_bindings = JNIHandles::resolve_non_null(bindings);
+  oop the_runnable = JNIHandles::resolve_non_null(runnable);
+
+  InstanceKlass* runnable_klass = InstanceKlass::cast(the_runnable->klass());
+  JavaCalls::call_virtual(&result,
+                          Handle(self, the_runnable),
+                          runnable_klass,
+                          vmSymbols::run_method_name(),
+                          vmSymbols::void_method_signature(),
+                          this);
+}
+
 void JavaThread::allocate_threadObj(Handle thread_group, const char* thread_name,
                                     bool daemon, TRAPS) {
   assert(thread_group.not_null(), "thread group should be specified");

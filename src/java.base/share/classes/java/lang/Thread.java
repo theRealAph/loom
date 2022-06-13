@@ -398,6 +398,9 @@ public class Thread implements Runnable {
     @IntrinsicCandidate
     static native void setExtentLocalCache(Object[] cache);
 
+    static native void runWithExtentLocalBindings(Thread thread, Object aCarrier,
+                                                  Object aRunnable);
+
     /**
      * A hint to the scheduler that the current thread is willing to yield
      * its current use of a processor. The scheduler is free to ignore this

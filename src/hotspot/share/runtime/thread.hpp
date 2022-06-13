@@ -1131,6 +1131,7 @@ private:
   void set_vthread(oop p);
   oop extentLocalCache() const;
   void set_extentLocalCache(oop p);
+  void runWithExtentLocalBindings(jobject jthread, jobject bindings, jobject runnable);
   oop jvmti_vthread() const;
   void set_jvmti_vthread(oop p);
 

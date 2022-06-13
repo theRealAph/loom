@@ -3190,6 +3190,14 @@ JVM_ENTRY(void, JVM_SetExtentLocalCache(JNIEnv* env, jclass threadClass,
   thread->set_extentLocalCache(objs);
 JVM_END
 
+JVM_ENTRY(void, JVM_RunWithExtentLocalBindings(JNIEnv* env, jclass threadClass,
+                                              jobject jthread, jobject theBindings, jobject aRunnable))
+  // oop java_thread = JNIHandles::resolve_non_null(jthread);
+  // oop the_bindings = JNIHandles::resolve_non_null(theBindings);
+  // oop the_runnable = JNIHandles::resolve_non_null(aRunnable);
+  thread->runWithExtentLocalBindings(jthread, theBindings, aRunnable);
+JVM_END
+
 // java.lang.SecurityManager ///////////////////////////////////////////////////////////////////////
 
 JVM_ENTRY(jobjectArray, JVM_GetClassContext(JNIEnv *env))

@@ -355,9 +355,12 @@ public final class ExtentLocal<T> {
         public void run(Runnable op) {
             Objects.requireNonNull(op);
             Cache.invalidate(bitmask);
-            var prevBindings = addExtentLocalBindings(this);
+            var prevBindings = extentLocalBindings();
+            var snapshot = new Snapshot(this, prevBindings);
+            // ExtentLocal.setExtentLocalBindings(b);
             try {
-                ExtentLocalContainer.run(op);
+                JLA.runWithExtentLocalBindings(Thread.currentThread(), snapshot, op);
+                // ExtentLocalContainer.run(op);
             } catch (Throwable t) {
                 setExtentLocalCache(null); // Cache.invalidate();
                 throw t;
@@ -534,6 +537,11 @@ public final class ExtentLocal<T> {
 
     private static void setExtentLocalCache(Object[] cache) {
         JLA.setExtentLocalCache(cache);
+    }
+
+    private static void runWithExtentLocalBindings(Thread thread, Snapshot aSnapshot,
+                                                   Runnable aRunnable) {
+        JLA.runWithExtentLocalBindings(thread, aSnapshot, aRunnable);
     }
 
     private static Snapshot extentLocalBindings() {

@@ -327,6 +327,9 @@ JVM_SetExtentLocalCache(JNIEnv *env, jclass threadClass, jobject theCache);
 JNIEXPORT jlong JNICALL
 JVM_GetNextThreadIdOffset(JNIEnv *env, jclass threadClass);
 
+JNIEXPORT void JNICALL
+JVM_RunWithExtentLocalBindings(JNIEnv* env, jclass threadClass,
+                               jobject jthread, jobject theBindings, jobject aRunnable);
 /*
  * jdk.internal.vm.Continuation
  */
