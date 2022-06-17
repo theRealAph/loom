@@ -275,7 +275,11 @@ class methodHandle;
    do_name(     setExtentLocalCache_name,                         "setExtentLocalCache")                                  \
    do_signature(setExtentLocalCache_signature,                    "([Ljava/lang/Object;)V")                              \
   do_intrinsic(_setCurrentThread,         java_lang_Thread,       setCurrentThread_name, thread_void_signature,   F_RN) \
-   do_name(     setCurrentThread_name,                           "setCurrentThread")                                    \
+   do_name(     setCurrentThread_name,                            "setCurrentThread")                                    \
+                                                                                                                        \
+  do_class(extentLocalContainer,                  "jdk/internal/vm/ExtentLocalContainer")               \
+   do_signature(extentLocalContainer_run_signature,              "(Ljava/lang/Runnable;)V")                              \
+   do_signature(extentLocalContainer_call_signature,              "(Ljava/util/concurrent/Callable;)Ljava/lang/Object;")                              \
                                                                                                                         \
   /* reflective intrinsics, for java/lang/Class, etc. */                                                                \
   do_intrinsic(_isAssignableFrom,         java_lang_Class,        isAssignableFrom_name, class_boolean_signature, F_RN) \
@@ -578,6 +582,7 @@ class methodHandle;
   do_intrinsic(_fullFence,                jdk_internal_misc_Unsafe,     fullFence_name, fullFence_signature,           F_RN)     \
    do_name(     fullFence_name,                                         "fullFence")                                             \
    do_alias(    fullFence_signature,                                    void_method_signature)                                   \
+                                                                                                                        \
   /* Custom branch frequencies profiling support for JSR292 */                                                          \
   do_class(java_lang_invoke_MethodHandleImpl,               "java/lang/invoke/MethodHandleImpl")                        \
   do_intrinsic(_profileBoolean, java_lang_invoke_MethodHandleImpl, profileBoolean_name, profileBoolean_signature, F_S)  \

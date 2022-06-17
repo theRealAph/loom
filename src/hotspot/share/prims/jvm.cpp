@@ -3192,10 +3192,21 @@ JVM_END
 
 JVM_ENTRY(void, JVM_RunWithExtentLocalBindings(JNIEnv* env, jclass threadClass,
                                               jobject jthread, jobject theBindings, jobject aRunnable))
-  // oop java_thread = JNIHandles::resolve_non_null(jthread);
-  // oop the_bindings = JNIHandles::resolve_non_null(theBindings);
-  // oop the_runnable = JNIHandles::resolve_non_null(aRunnable);
-  thread->runWithExtentLocalBindings(jthread, theBindings, aRunnable);
+  thread->runWithExtentLocalBindings(jthread, theBindings, aRunnable, THREAD);
+  if (thread->has_pending_exception()) {
+    fprintf(stderr, "exception\n");
+    //env->ExceptionDescribe();
+  }
+JVM_END
+
+JVM_ENTRY(jobject, JVM_CallWithExtentLocalBindings(JNIEnv* env, jclass threadClass,
+                                              jobject jthread, jobject theBindings, jobject aCallable))
+  oop result = thread->callWithExtentLocalBindings(jthread, theBindings, aCallable, THREAD);
+  if (thread->has_pending_exception()) {
+    fprintf(stderr, "exception\n");
+    //env->ExceptionDescribe();
+  }
+  return (jobject) JNIHandles::make_local(THREAD, result);
 JVM_END
 
 // java.lang.SecurityManager ///////////////////////////////////////////////////////////////////////

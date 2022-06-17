@@ -26,6 +26,7 @@ package org.openjdk.bench.jdk.incubator.concurrent;
 
 import jdk.incubator.concurrent.ExtentLocal;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.Callable;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.Blackhole;
 
@@ -191,5 +192,33 @@ public class ExtentLocals {
         // tl1.set(tl1.get() + 1);
         var ctr = tl_atomicInt.get();
         ctr.setPlain(ctr.getPlain() + 1);
+    }
+
+    public static class Deep extends ExtentLocals {
+
+        @Param({"2", "50"})
+        int depth;
+
+        @SuppressWarnings("removal")
+        private Integer recurse(int depth) {
+            if (depth > 0) {
+                return recurse(depth - 1);
+            } else {
+                return sl1.get();
+            }
+        }
+
+        @SuppressWarnings("removal")
+        @Benchmark
+        public Integer testRecurse() {
+            return recurse(depth);
+        }
+
+        @SuppressWarnings("removal")
+        @Benchmark
+        public Integer testPrivInline() throws Exception {
+            Callable<Integer> op = () -> recurse(depth);
+            return ExtentLocal.where(sl1, 465).call(op);
+        }
     }
 }

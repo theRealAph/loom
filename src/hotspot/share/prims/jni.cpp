@@ -2651,10 +2651,6 @@ JNI_ENTRY(jint, jni_RegisterNatives(JNIEnv *env, jclass clazz,
     const char* meth_sig = methods[index].signature;
     int meth_name_len = (int)strlen(meth_name);
 
-    if (strcmp(meth_name, "runWithExtentLocalBindings") == 0) {
-      asm("nop");
-    }
-
     // The class should have been loaded (we have an instance of the class
     // passed in) so the method and signature should already be in the symbol
     // table.  If they're not there, the method doesn't exist.

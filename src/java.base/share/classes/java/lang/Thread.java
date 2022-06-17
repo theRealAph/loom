@@ -400,6 +400,8 @@ public class Thread implements Runnable {
 
     static native void runWithExtentLocalBindings(Thread thread, Object aCarrier,
                                                   Object aRunnable);
+    static native Object callWithExtentLocalBindings(Thread thread, Object aCarrier,
+                                                   Object aCallable);
 
     /**
      * A hint to the scheduler that the current thread is willing to yield

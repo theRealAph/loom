@@ -823,21 +823,47 @@ void JavaThread::set_extentLocalCache(oop p) {
   _extentLocalCache.replace(p);
 }
 
-void JavaThread::runWithExtentLocalBindings(jobject thread, jobject bindings, jobject runnable) {
+void JavaThread::runWithExtentLocalBindings(jobject java_thread, jobject bindings, jobject runnable, TRAPS) {
   JavaValue result(T_VOID);
-  InstanceKlass* ik = vmClasses::Thread_klass();
-  assert(ik->is_initialized(), "must be");
-  oop thread_oop = JNIHandles::resolve_non_null(thread);
+  InstanceKlass* ik = InstanceKlass::cast(SystemDictionary::resolve_or_fail(vmSymbols::extentLocalContainer(), true, this));
+  // Do we need this?
+  // assert(ik->is_initialized(), "must be");
   oop the_bindings = JNIHandles::resolve_non_null(bindings);
   oop the_runnable = JNIHandles::resolve_non_null(runnable);
+  oop thread_oop = JNIHandles::resolve_non_null(java_thread);
 
-  InstanceKlass* runnable_klass = InstanceKlass::cast(the_runnable->klass());
-  JavaCalls::call_virtual(&result,
-                          Handle(self, the_runnable),
-                          runnable_klass,
-                          vmSymbols::run_method_name(),
-                          vmSymbols::void_method_signature(),
-                          this);
+  Handle jthread(THREAD, thread_oop);
+  Handle prev_bindings(THREAD, java_lang_Thread::extentLocalBindings(jthread()));
+  java_lang_Thread::set_extentLocalBindings(jthread(), the_bindings);
+  JavaCalls::call_static(&result,
+                         ik,
+                         vmSymbols::run_method_name(),
+                         vmSymbols::extentLocalContainer_run_signature(),
+                         Handle(THREAD, the_runnable),
+                         THREAD);
+  java_lang_Thread::set_extentLocalBindings(jthread(), prev_bindings());
+}
+
+oop JavaThread::callWithExtentLocalBindings(jobject java_thread, jobject bindings, jobject callable, TRAPS) {
+  JavaValue result(T_OBJECT);
+  InstanceKlass* ik = InstanceKlass::cast(SystemDictionary::resolve_or_fail(vmSymbols::extentLocalContainer(), true, this));
+  // Do we need this?
+  // assert(ik->is_initialized(), "must be");
+  oop the_bindings = JNIHandles::resolve_non_null(bindings);
+  oop the_callable = JNIHandles::resolve_non_null(callable);
+  oop thread_oop = JNIHandles::resolve_non_null(java_thread);
+
+  Handle jthread(THREAD, thread_oop);
+  Handle prev_bindings(THREAD, java_lang_Thread::extentLocalBindings(jthread()));
+  java_lang_Thread::set_extentLocalBindings(jthread(), the_bindings);
+  JavaCalls::call_static(&result,
+                         ik,
+                         vmSymbols::call_method_name(),
+                         vmSymbols::extentLocalContainer_call_signature(),
+                         Handle(THREAD, the_callable),
+                         THREAD);
+  java_lang_Thread::set_extentLocalBindings(jthread(), prev_bindings());
+  return result.get_oop();
 }
 
 void JavaThread::allocate_threadObj(Handle thread_group, const char* thread_name,
