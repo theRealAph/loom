@@ -196,6 +196,8 @@ JVM_ReportFinalizationComplete
 JVM_ResumeThread
 JVM_ExtentLocalCache
 JVM_SetExtentLocalCache
+JVM_CallWithExtentLocalBindings
+JVM_RunWithExtentLocalBindings
 JVM_SetArrayElement
 JVM_SetClassSigners
 JVM_SetNativeThreadName
