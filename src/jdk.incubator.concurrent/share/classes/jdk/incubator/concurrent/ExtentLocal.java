@@ -323,12 +323,14 @@ public final class ExtentLocal<T> {
          * @return the result
          * @throws Exception if {@code op} completes with an exception
          */
+        @SuppressWarnings("unchecked")
         public <R> R call(Callable<R> op) throws Exception {
             Objects.requireNonNull(op);
             Cache.invalidate(bitmask);
             var prevBindings = addExtentLocalBindings(this);
+            var snapshot = new Snapshot(this, prevBindings);
             try {
-                return ExtentLocalContainer.call(op);
+                return (R)JLA.callWithExtentLocalBindings(Thread.currentThread(), snapshot, op);
             } catch (Throwable t) {
                 setExtentLocalCache(null); // Cache.invalidate();
                 throw t;
@@ -355,9 +357,12 @@ public final class ExtentLocal<T> {
         public void run(Runnable op) {
             Objects.requireNonNull(op);
             Cache.invalidate(bitmask);
-            var prevBindings = addExtentLocalBindings(this);
+            var prevBindings = extentLocalBindings();
+            var snapshot = new Snapshot(this, prevBindings);
+            // ExtentLocal.setExtentLocalBindings(b);
             try {
-                ExtentLocalContainer.run(op);
+                JLA.runWithExtentLocalBindings(Thread.currentThread(), snapshot, op);
+                // ExtentLocalContainer.run(op);
             } catch (Throwable t) {
                 setExtentLocalCache(null); // Cache.invalidate();
                 throw t;
@@ -534,6 +539,16 @@ public final class ExtentLocal<T> {
 
     private static void setExtentLocalCache(Object[] cache) {
         JLA.setExtentLocalCache(cache);
+    }
+
+    private static void runWithExtentLocalBindings(Thread thread, Snapshot aSnapshot,
+                                                   Runnable aRunnable) {
+        JLA.runWithExtentLocalBindings(thread, aSnapshot, aRunnable);
+    }
+
+    private static Object callWithExtentLocalBindings(Thread thread, Snapshot aSnapshot,
+                                                      Callable<?> aCallable) {
+        return JLA.callWithExtentLocalBindings(thread, aSnapshot, aCallable);
     }
 
     private static Snapshot extentLocalBindings() {

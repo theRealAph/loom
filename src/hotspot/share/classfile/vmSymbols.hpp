@@ -397,6 +397,7 @@
   template(stillborn_name,                            "stillborn")                                \
   template(group_name,                                "group")                                    \
   template(daemon_name,                               "daemon")                                   \
+  template(call_method_name,                          "call")                                     \
   template(run_method_name,                           "run")                                      \
   template(interrupt_method_name,                     "interrupt")                                \
   template(exit_method_name,                          "exit")                                     \

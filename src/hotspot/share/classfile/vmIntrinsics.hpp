@@ -281,7 +281,11 @@ class methodHandle;
    do_name(     setExtentLocalCache_name,                         "setExtentLocalCache")                                  \
    do_signature(setExtentLocalCache_signature,                    "([Ljava/lang/Object;)V")                              \
   do_intrinsic(_setCurrentThread,         java_lang_Thread,       setCurrentThread_name, thread_void_signature,   F_RN) \
-   do_name(     setCurrentThread_name,                           "setCurrentThread")                                    \
+   do_name(     setCurrentThread_name,                            "setCurrentThread")                                    \
+                                                                                                                        \
+  do_class(extentLocalContainer,                  "jdk/internal/vm/ExtentLocalContainer")               \
+   do_signature(extentLocalContainer_run_signature,              "(Ljava/lang/Runnable;)V")                              \
+   do_signature(extentLocalContainer_call_signature,              "(Ljava/util/concurrent/Callable;)Ljava/lang/Object;")                              \
                                                                                                                         \
   /* reflective intrinsics, for java/lang/Class, etc. */                                                                \
   do_intrinsic(_isAssignableFrom,         java_lang_Class,        isAssignableFrom_name, class_boolean_signature, F_RN) \
