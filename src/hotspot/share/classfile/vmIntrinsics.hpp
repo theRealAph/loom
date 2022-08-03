@@ -275,21 +275,29 @@ class methodHandle;
    do_name(     currentThread_name,                              "currentThread")                                       \
    do_signature(currentThread_signature,                         "()Ljava/lang/Thread;")                                \
   do_intrinsic(_extentLocalCache,          java_lang_Thread,       extentLocalCache_name, extentLocalCache_signature, F_SN) \
-   do_name(     extentLocalCache_name,                            "extentLocalCache")                                     \
-   do_signature(extentLocalCache_signature,                       "()[Ljava/lang/Object;")                               \
+   do_name(     extentLocalCache_name,                            "extentLocalCache") \
+   do_signature(extentLocalCache_signature,                       "()[Ljava/lang/Object;") \
   do_intrinsic(_setExtentLocalCache,       java_lang_Thread,       setExtentLocalCache_name, setExtentLocalCache_signature, F_SN) \
-   do_name(     setExtentLocalCache_name,                         "setExtentLocalCache")                                  \
-   do_signature(setExtentLocalCache_signature,                    "([Ljava/lang/Object;)V")                              \
+   do_name(     setExtentLocalCache_name,                         "setExtentLocalCache") \
+   do_signature(setExtentLocalCache_signature,                    "([Ljava/lang/Object;)V") \
   do_intrinsic(_setCurrentThread,         java_lang_Thread,       setCurrentThread_name, thread_void_signature,   F_RN) \
-   do_name(     setCurrentThread_name,                            "setCurrentThread")                                    \
-                                                                                                                        \
-  do_class(extentLocalContainer,                  "jdk/internal/vm/ExtentLocalContainer")               \
-   do_signature(extentLocalContainer_run_signature,              "(Ljava/lang/Runnable;)V")                              \
-   do_signature(extentLocalContainer_call_signature,              "(Ljava/util/concurrent/Callable;)Ljava/lang/Object;")                              \
-                                                                                                                        \
-  /* reflective intrinsics, for java/lang/Class, etc. */                                                                \
+   do_name(     setCurrentThread_name,                            "setCurrentThread") \
+                                                                        \
+  do_intrinsic(_runWithExtentLocalBindings, java_lang_Thread,       runWithExtentLocalBindings_name, runWithExtentLocalBindings_signature, F_SN) \
+   do_signature( runWithExtentLocalBindings_signature, "(Ljava/lang/Thread;Ljava/lang/Object;Ljava/lang/Object;)V") \
+   do_name(     runWithExtentLocalBindings_name,                            "runWithExtentLocalBindings") \
+  do_intrinsic(_callWithExtentLocalBindings, java_lang_Thread,       callWithExtentLocalBindings_name, callWithExtentLocalBindings_signature, F_SN) \
+   do_signature( callWithExtentLocalBindings_signature, "(Ljava/lang/Thread;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;") \
+   do_name(     callWithExtentLocalBindings_name,                            "callWithExtentLocalBindings") \
+                                                                        \
+                                                                        \
+  do_class(extentLocalContainer,                  "jdk/internal/vm/ExtentLocalContainer") \
+   do_signature(extentLocalContainer_run_signature,              "(Ljava/lang/Runnable;)V") \
+   do_signature(extentLocalContainer_call_signature,              "(Ljava/util/concurrent/Callable;)Ljava/lang/Object;") \
+                                                                        \
+  /* reflective intrinsics, for java/lang/Class, etc. */                \
   do_intrinsic(_isAssignableFrom,         java_lang_Class,        isAssignableFrom_name, class_boolean_signature, F_RN) \
-   do_name(     isAssignableFrom_name,                           "isAssignableFrom")                                    \
+   do_name(     isAssignableFrom_name,                           "isAssignableFrom") \
   do_intrinsic(_isInstance,               java_lang_Class,        isInstance_name, object_boolean_signature,     F_RN)  \
    do_name(     isInstance_name,                                 "isInstance")                                          \
   do_intrinsic(_getModifiers,             java_lang_Class,        getModifiers_name, void_int_signature,         F_RN)  \

@@ -24,6 +24,7 @@
 
 #include "precompiled.hpp"
 #include "asm/macroAssembler.hpp"
+#include "classfile/javaClasses.hpp"
 #include "compiler/disassembler.hpp"
 #include "interpreter/interp_masm.hpp"
 #include "interpreter/interpreter.hpp"
@@ -458,5 +459,61 @@ address TemplateInterpreterGenerator::generate_currentThread() {
   __ jmp(rcx);
 
   return entry_point;
+}
+
+address  TemplateInterpreterGenerator::generate_java_lang_thread_runWithExtentLocalBindings() {
+  address entry = __ pc();
+  __ push_call_clobbered_registers_except(rax);
+  __ set_last_Java_frame(r15_thread, noreg, rbp, NULL);
+
+  __ movptr(rcx, Address(r13, 2*wordSize)); // java.lang.Thread
+  __ movptr(rdx, Address(r13, 1*wordSize)); // jdk.incubator.concurrent.ExtentLocal$Snapshot
+  __ load_heap_oop(rbx, Address(rcx, java_lang_Thread::extentLocalBindings_offset()), rsi);
+  __ store_heap_oop(Address(rcx, java_lang_Thread::extentLocalBindings_offset()), rdx, rax, r8, rdi);
+
+  __ mov(c_rarg0, r15_thread);
+  __ call(RuntimeAddress(CAST_FROM_FN_PTR(address, JavaThread::extentLocalContainer_run_method)));
+
+  __ pop_call_clobbered_registers_except(rax);
+  __ reset_last_Java_frame(true);
+
+  __ subptr(rsp, 3*wordSize);
+
+  __ movptr(rdx, Address(r13, 0*wordSize)); // The lambda to call
+  __ movptr(Address(rsp, 0*wordSize), rdx);
+  __ movptr(Address(rsp, 1*wordSize), rbx); // prev j.i.c.ExtentLocal$Snapshot
+  __ subptr(r13, rsp);
+  __ movptr(Address(rsp, 2*wordSize), r13); // offset to sender sp
+
+  // Call interpreter entry with our outgoing arg
+  __ mov(r13, rsp);
+  __ mov(rbx, rax); // Method*
+  __ movptr(rax, Address(rbx, Method::from_interpreted_offset()));
+  __ call(rax);
+
+  // Calculate prev SP
+  __ movptr(r13, Address(rsp, 2*wordSize));
+  __ addptr(r13, rsp);
+
+  __ movptr(rbx, Address(rsp, 1*wordSize)); // prev j.i.c.ExtentLocal$Snapshot
+  __ movptr(rcx, Address(r13, 2*wordSize)); // java.lang.Thread
+  __ store_heap_oop(Address(rcx, java_lang_Thread::extentLocalBindings_offset()),
+                    rbx, rdx, r8, rdi);
+
+  __ movptr(rcx, Address(rsp, 3*wordSize));  // Saved return address
+
+  __ mov(rsp, r13);
+  __ jmp(rcx);
+
+  return entry;
+}
+
+address  TemplateInterpreterGenerator::generate_java_lang_thread_callWithExtentLocalBindings() {
+  __ push_call_clobbered_registers(0);
+  __ mov(c_rarg0, r15_thread);
+  // __ call(RuntimeAddress(CAST_FROM_FN_PTR(address, JavaThread::extentLocalContainer_call_method)));
+  __ pop_call_clobbered_registers_except(rax);
+  __ call(rax);
+  return NULL;
 }
 

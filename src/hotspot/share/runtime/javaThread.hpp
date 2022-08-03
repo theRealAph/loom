@@ -514,6 +514,7 @@ private:
   oop extentLocalCache() const;
   void set_extentLocalCache(oop p);
   void runWithExtentLocalBindings(jobject java_thread, jobject bindings, jobject runnable, TRAPS);
+  static Method *extentLocalContainer_run_method(JavaThread *self);
   oop callWithExtentLocalBindings(jobject java_thread, jobject bindings, jobject callable, TRAPS);
 
   oop jvmti_vthread() const;

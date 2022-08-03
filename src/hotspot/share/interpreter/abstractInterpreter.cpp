@@ -156,6 +156,8 @@ AbstractInterpreter::MethodKind AbstractInterpreter::method_kind(const methodHan
           return java_lang_continuation_doYield;
         }
         break;
+      case vmIntrinsics::_runWithExtentLocalBindings:
+        return java_lang_thread_runWithExtentLocalBindings;
       case vmIntrinsics::_Object_init:
         if (RegisterFinalizersAtInit && m->code_size() == 1) {
           // We need to execute the special return bytecode to check for
@@ -163,6 +165,10 @@ AbstractInterpreter::MethodKind AbstractInterpreter::method_kind(const methodHan
           return zerolocals;
         }
         break;
+      // case vmIntrinsics::_runWithExtentLocalBindings:
+      //   return java_lang_thread_runWithExtentLocalBindings;
+      // case vmIntrinsics::_callWithExtentLocalBindings:
+      //   return java_lang_thread_callWithExtentLocalBindings;
       default: break;
     }
   }

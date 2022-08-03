@@ -407,6 +407,9 @@ class java_lang_Thread : AllStatic {
   static void clear_extentLocalBindings(oop java_thread);
   static oop extentLocalBindings(oop java_thread);
   static void set_extentLocalBindings(oop java_thread, oop bindings);
+  static int extentLocalBindings_offset() {
+    return _extentLocalBindings_offset;
+  }
 
   // Blocker object responsible for thread parking
   static oop park_blocker(oop java_thread);

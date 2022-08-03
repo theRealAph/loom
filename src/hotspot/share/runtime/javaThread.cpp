@@ -190,6 +190,20 @@ void JavaThread::set_extentLocalCache(oop p) {
   _extentLocalCache.replace(p);
 }
 
+Method *JavaThread::extentLocalContainer_run_method(JavaThread *current) {
+  // assert(current == JavaThread::current(), "Must be");
+  MACOS_AARCH64_ONLY(ThreadWXEnable __wx(WXWrite, current));
+  ThreadInVMfromJava __tiv(current);
+  VM_ENTRY_BASE(Method *, , current);
+  debug_only(VMEntryWrapper __vew;)
+  InstanceKlass* ik = InstanceKlass::cast(SystemDictionary::resolve_or_fail(vmSymbols::extentLocalContainer(), true, current));
+  CallInfo callinfo;
+  LinkInfo link_info(ik, vmSymbols::run_method_name(),
+                     vmSymbols::extentLocalContainer_run_signature());
+  LinkResolver::resolve_static_call(callinfo, link_info, true, current);
+  return callinfo.selected_method();
+}
+
 void JavaThread::runWithExtentLocalBindings(jobject java_thread, jobject bindings, jobject runnable, TRAPS) {
   JavaValue result(T_VOID);
   InstanceKlass* ik = InstanceKlass::cast(SystemDictionary::resolve_or_fail(vmSymbols::extentLocalContainer(), true, this));
@@ -202,6 +216,7 @@ void JavaThread::runWithExtentLocalBindings(jobject java_thread, jobject binding
   Handle jthread(THREAD, thread_oop);
   Handle prev_bindings(THREAD, java_lang_Thread::extentLocalBindings(jthread()));
   java_lang_Thread::set_extentLocalBindings(jthread(), the_bindings);
+
   JavaCalls::call_static(&result,
                          ik,
                          vmSymbols::run_method_name(),
