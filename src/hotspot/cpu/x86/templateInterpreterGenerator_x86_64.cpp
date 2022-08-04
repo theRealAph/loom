@@ -461,24 +461,38 @@ address TemplateInterpreterGenerator::generate_currentThread() {
   return entry_point;
 }
 
+static address extentLocalContainer_run_method;
+
 address  TemplateInterpreterGenerator::generate_java_lang_thread_runWithExtentLocalBindings() {
   address entry = __ pc();
-  __ push_call_clobbered_registers_except(rax);
-  __ set_last_Java_frame(r15_thread, noreg, rbp, NULL);
-
   __ movptr(rcx, Address(r13, 2*wordSize)); // java.lang.Thread
   __ movptr(rdx, Address(r13, 1*wordSize)); // jdk.incubator.concurrent.ExtentLocal$Snapshot
   __ load_heap_oop(rbx, Address(rcx, java_lang_Thread::extentLocalBindings_offset()), rsi);
   __ store_heap_oop(Address(rcx, java_lang_Thread::extentLocalBindings_offset()), rdx, rax, r8, rdi);
 
-  __ mov(c_rarg0, r15_thread);
-  __ call(RuntimeAddress(CAST_FROM_FN_PTR(address, JavaThread::extentLocalContainer_run_method)));
+  Label OK;
+  __ lea(rax, ExternalAddress((address)&extentLocalContainer_run_method));
+  __ movptr(rax, Address(rax, 0));
+  __ orptr(rax, rax);
+  __ jcc(Assembler::notZero, OK);
+  {
+    __ push_call_clobbered_registers();
+    __ set_last_Java_frame(r15_thread, noreg, rbp, NULL);
 
-  __ pop_call_clobbered_registers_except(rax);
-  __ reset_last_Java_frame(true);
+    __ mov(c_rarg0, r15_thread);
+    __ call(RuntimeAddress(CAST_FROM_FN_PTR(address, JavaThread::extentLocalContainer_run_method)));
+    __ lea(rdx, ExternalAddress((address)&extentLocalContainer_run_method));
+    __ movptr(Address(rdx, 0), rax);
+
+    __ pop_call_clobbered_registers();
+    __ reset_last_Java_frame(true);
+
+    __ lea(rax, ExternalAddress((address)&extentLocalContainer_run_method));
+    __ movptr(rax, Address(rax, 0));
+  }
+  __ bind(OK);
 
   __ subptr(rsp, 3*wordSize);
-
   __ movptr(rdx, Address(r13, 0*wordSize)); // The lambda to call
   __ movptr(Address(rsp, 0*wordSize), rdx);
   __ movptr(Address(rsp, 1*wordSize), rbx); // prev j.i.c.ExtentLocal$Snapshot
