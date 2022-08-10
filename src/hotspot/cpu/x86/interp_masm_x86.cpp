@@ -2064,16 +2064,18 @@ void InterpreterMacroAssembler::notify_method_exit(
   }
 }
 
-void InterpreterMacroAssembler::remove_ExtentLocalBindings(size_t stack_offset) {
+void InterpreterMacroAssembler::remove_ExtentLocalBindings(size_t stack_offset,
+     Register result,
+     Register tmp1, Register tmp2, Register tmp3, Register tmp4, Register tmp5) {
   // Calculate prev SP
-  movptr(r13, Address(rsp, 2*wordSize +  stack_offset));
-  addptr(r13, rsp);
-  addptr(r13, stack_offset);
+  movptr(result, Address(rsp, 2*wordSize +  stack_offset));
+  addptr(result, rsp);
+  addptr(result, stack_offset);
 
-  movptr(rbx, Address(rsp, 1*wordSize + stack_offset)); // prev j.i.c.ExtentLocal$Snapshot
-  movptr(rcx, Address(r13, 2*wordSize)); // java.lang.Thread
-  store_heap_oop(Address(rcx, java_lang_Thread::extentLocalBindings_offset()),
-                 rbx, rdx, r8, rdi);
+  movptr(tmp2, Address(rsp, 1*wordSize + stack_offset)); // prev j.i.c.ExtentLocal$Snapshot
+  movptr(tmp1, Address(result, 2*wordSize)); // java.lang.Thread
+  store_heap_oop(Address(tmp1, java_lang_Thread::extentLocalBindings_offset()),
+                 tmp2, tmp3, tmp4, tmp5);
 
-  movptr(rcx, Address(rsp, 4*wordSize +  stack_offset));  // Saved return address
+  movptr(tmp1, Address(rsp, 4*wordSize +  stack_offset));  // Saved return address
 }

@@ -515,7 +515,7 @@ address  TemplateInterpreterGenerator::generate_java_lang_thread_runWithExtentLo
 
   extentLocalContainer_callout = __ pc();
 
-  __ remove_ExtentLocalBindings(0);
+  __ remove_ExtentLocalBindings(0, /*new sp*/r13, /*temps*/rcx, rbx, rdx, r8, rdi);
 
   __ mov(rsp, r13);
   __ jmp(rcx);
@@ -523,9 +523,7 @@ address  TemplateInterpreterGenerator::generate_java_lang_thread_runWithExtentLo
   Interpreter::_remove_bindings_entry = __ pc();
 
   // rdx: preserved exception oop
-  __ push_ptr(rax);
-  __ remove_ExtentLocalBindings(wordSize);
-  __ pop_ptr(rax);
+  __ remove_ExtentLocalBindings(0, /*new sp*/r13, /*temps*/rcx, rbx, rdx, r8, rdi);
   __ empty_expression_stack();
   __ restore_bcp();
 
@@ -541,7 +539,7 @@ address  TemplateInterpreterGenerator::generate_java_lang_thread_runWithExtentLo
 
   // rax: exception handler entry point
   // rdx: preserved exception oop
-  // r13/rsi: bcp for exception handler
+  // r13(rbcp): bcp for exception handler
   __ push_ptr(rdx); // push exception which is now the only value on the stack
   __ jmp(rax); // jump to exception handler (may be _remove_activation_entry!)
 
