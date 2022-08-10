@@ -453,7 +453,8 @@ JRT_END
 // The continuation address is the entry point of the exception handler of the
 // previous frame depending on the return address.
 
-extern address extentLocalContainer_callout;
+extern address extentLocalContainer_call_site;
+extern address extentLocalContainer_run_site;
 
 address SharedRuntime::raw_exception_handler_for_return_address(JavaThread* current, address return_address) {
   // Note: This is called when we have unwound the frame of the callee that did
@@ -520,7 +521,8 @@ address SharedRuntime::raw_exception_handler_for_return_address(JavaThread* curr
   }
   // Interpreted code
   if (Interpreter::contains(return_address)) {
-    if (return_address == extentLocalContainer_callout) {
+    if (return_address == extentLocalContainer_call_site ||
+        return_address == extentLocalContainer_run_site) {
       return Interpreter::remove_bindings_entry();
     }
     // The deferred StackWatermarkSet::after_unwind check will be performed in

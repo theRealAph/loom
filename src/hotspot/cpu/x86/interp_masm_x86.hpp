@@ -212,6 +212,8 @@ class InterpreterMacroAssembler: public MacroAssembler {
   void prepare_to_jump_from_interpreted();
   void jump_from_interpreted(Register method, Register temp);
 
+  address invoke_WithExtentLocalBindings(address *extentLocalContainer_run_method,
+                                         address *extentLocalContainer_call_site);
   void remove_ExtentLocalBindings(size_t stack_offset,
      Register result,
      Register tmp1, Register tmp2, Register tmp3, Register tmp4, Register tmp5);
