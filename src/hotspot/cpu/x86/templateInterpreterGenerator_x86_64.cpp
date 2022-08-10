@@ -465,18 +465,18 @@ address extentLocalContainer_callout;
 static address extentLocalContainer_run_method;
 
 address  TemplateInterpreterGenerator::generate_java_lang_thread_runWithExtentLocalBindings() {
-  bool foo = __ _should_check_sp;
-  // __ _should_check_sp = false;
-
   address entry = __ pc();
-  __ movptr(rcx, Address(r13, 2*wordSize)); // java.lang.Thread
-  __ movptr(rdx, Address(r13, 1*wordSize)); // jdk.incubator.concurrent.ExtentLocal$Snapshot
-  __ load_heap_oop(rbx, Address(rcx, java_lang_Thread::extentLocalBindings_offset()), rsi);
-  __ store_heap_oop(Address(rcx, java_lang_Thread::extentLocalBindings_offset()), rdx, rax, r8, rdi);
 
-  __ movptr(rdx, Address(rsp, 0)); // Return address
-  __ andptr(rsp, -2*wordSize);     // Align
-  __ movptr(Address(rsp, 0), rdx); // Return address
+  // j_rarg0 is live
+
+  __ movptr(j_rarg2, Address(r13, 2*wordSize)); // java.lang.Thread
+  __ movptr(j_rarg1, Address(r13, 1*wordSize)); // jdk.incubator.concurrent.ExtentLocal$Snapshot
+  __ load_heap_oop(rbx, Address(j_rarg2, java_lang_Thread::extentLocalBindings_offset()), rsi);
+  __ store_heap_oop(Address(j_rarg2, java_lang_Thread::extentLocalBindings_offset()), j_rarg1, rax, j_rarg3, j_rarg5);
+
+  __ movptr(j_rarg1, Address(rsp, 0)); // Return address
+  __ andptr(rsp, -2*wordSize);         // Align
+  __ movptr(Address(rsp, 0), j_rarg1); // Return address
 
   Label OK;
   __ lea(rax, ExternalAddress((address)&extentLocalContainer_run_method));
@@ -489,8 +489,8 @@ address  TemplateInterpreterGenerator::generate_java_lang_thread_runWithExtentLo
 
     __ mov(c_rarg0, r15_thread);
     __ call(RuntimeAddress(CAST_FROM_FN_PTR(address, JavaThread::extentLocalContainer_run_method)));
-    __ lea(rdx, ExternalAddress((address)&extentLocalContainer_run_method));
-    __ movptr(Address(rdx, 0), rax);
+    __ lea(j_rarg1, ExternalAddress((address)&extentLocalContainer_run_method));
+    __ movptr(Address(j_rarg1, 0), rax);
 
     __ pop_call_clobbered_registers();
     __ reset_last_Java_frame(true);
@@ -501,8 +501,8 @@ address  TemplateInterpreterGenerator::generate_java_lang_thread_runWithExtentLo
   __ bind(OK);
 
   __ subptr(rsp, 4*wordSize);               // Keep stack 16-aligned
-  __ movptr(rdx, Address(r13, 0*wordSize)); // The lambda to call
-  __ movptr(Address(rsp, 0*wordSize), rdx);
+  __ movptr(j_rarg1, Address(r13, 0*wordSize)); // The lambda to call
+  __ movptr(Address(rsp, 0*wordSize), j_rarg1);
   __ movptr(Address(rsp, 1*wordSize), rbx); // prev j.i.c.ExtentLocal$Snapshot
   __ subptr(r13, rsp);
   __ movptr(Address(rsp, 2*wordSize), r13); // offset to sender sp
@@ -515,15 +515,16 @@ address  TemplateInterpreterGenerator::generate_java_lang_thread_runWithExtentLo
 
   extentLocalContainer_callout = __ pc();
 
-  __ remove_ExtentLocalBindings(0, /*new sp*/r13, /*temps*/rcx, rbx, rdx, r8, rdi);
+  // rax/xmm0 is live with the result of the call
+  __ remove_ExtentLocalBindings(0, /*new sp*/r13, /*temps*/j_rarg2, rbx, j_rarg1, j_rarg3, j_rarg5);
 
   __ mov(rsp, r13);
-  __ jmp(rcx);
+  __ jmp(j_rarg2);
 
   Interpreter::_remove_bindings_entry = __ pc();
 
-  // rdx: preserved exception oop
-  __ remove_ExtentLocalBindings(0, /*new sp*/r13, /*temps*/rcx, rbx, rdx, r8, rdi);
+  // j_rarg1: preserved exception oop
+  __ remove_ExtentLocalBindings(0, /*new sp*/r13, /*temps*/j_rarg2, rbx, j_rarg1, j_rarg3, j_rarg5);
   __ empty_expression_stack();
   __ restore_bcp();
 
@@ -532,18 +533,17 @@ address  TemplateInterpreterGenerator::generate_java_lang_thread_runWithExtentLo
 
 
   // find exception handler address and preserve exception oop
-  __ call_VM(rdx,
+  __ call_VM(j_rarg1,
              CAST_FROM_FN_PTR(address,
                           InterpreterRuntime::exception_handler_for_exception),
              rarg);
 
   // rax: exception handler entry point
-  // rdx: preserved exception oop
-  // r13(rbcp): bcp for exception handler
-  __ push_ptr(rdx); // push exception which is now the only value on the stack
+  // j_rarg1: preserved exception oop
+  // r13(AKA rbcp): bcp for exception handler
+  __ push_ptr(j_rarg1); // push exception which is now the only value on the stack
   __ jmp(rax); // jump to exception handler (may be _remove_activation_entry!)
 
-  __ _should_check_sp = foo;
   return entry;
 }
 
