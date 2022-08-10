@@ -125,6 +125,8 @@ class AbstractInterpreter: AllStatic {
 
   static address    _rethrow_exception_entry;                   // rethrows an activation in previous frame
 
+  static address _remove_bindings_entry;
+
   friend class      AbstractInterpreterGenerator;
   friend class      InterpreterMacroAssembler;
 
@@ -175,6 +177,8 @@ class AbstractInterpreter: AllStatic {
   static address return_entry(TosState state, int length, Bytecodes::Code code) { ShouldNotReachHere(); return NULL; }
 
   static address    rethrow_exception_entry()                   { return _rethrow_exception_entry; }
+
+  static address remove_bindings_entry() { return _remove_bindings_entry; }
 
   // Activation size in words for a method that is just being called.
   // Parameters haven't been pushed so count them too.

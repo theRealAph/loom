@@ -147,7 +147,12 @@ class CodeSection {
  public:
   address     start() const         { return _start; }
   address     mark() const          { return _mark; }
-  address     end() const           { return _end; }
+  address     end() const           {
+    if (_end == (address)0x7fffe7b66a42) {
+      printf("Whip!\n");
+    }
+    return _end;
+  }
   address     limit() const         { return _limit; }
   csize_t     size() const          { return (csize_t)(_end - _start); }
   csize_t     mark_off() const      { assert(_mark != NULL, "not an offset");

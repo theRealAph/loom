@@ -87,6 +87,7 @@ void AbstractInterpreter::print() {
 StubQueue* AbstractInterpreter::_code                                       = NULL;
 bool       AbstractInterpreter::_notice_safepoints                          = false;
 address    AbstractInterpreter::_rethrow_exception_entry                    = NULL;
+address    AbstractInterpreter::_remove_bindings_entry                      = NULL;
 
 address    AbstractInterpreter::_native_entry_begin                         = NULL;
 address    AbstractInterpreter::_native_entry_end                           = NULL;

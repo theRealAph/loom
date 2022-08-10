@@ -1484,6 +1484,8 @@ address TemplateInterpreterGenerator::generate_normal_entry(bool synchronized) {
 //-----------------------------------------------------------------------------
 // Exceptions
 
+extern address extentLocalContainer_callout;
+
 void TemplateInterpreterGenerator::generate_throw_exception() {
   // Entry point in previous activation (i.e., if the caller was
   // interpreted)

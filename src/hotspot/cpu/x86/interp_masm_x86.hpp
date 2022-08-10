@@ -212,6 +212,8 @@ class InterpreterMacroAssembler: public MacroAssembler {
   void prepare_to_jump_from_interpreted();
   void jump_from_interpreted(Register method, Register temp);
 
+  void remove_ExtentLocalBindings(size_t stack_offset);
+
   // narrow int return value
   void narrow(Register result);
 
@@ -309,6 +311,7 @@ class InterpreterMacroAssembler: public MacroAssembler {
   void profile_return_type(Register mdp, Register ret, Register tmp);
   void profile_parameters_type(Register mdp, Register tmp1, Register tmp2);
 
+  bool _should_check_sp = true;
 };
 
 #endif // CPU_X86_INTERP_MASM_X86_HPP

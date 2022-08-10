@@ -201,7 +201,7 @@ Method *JavaThread::extentLocalContainer_run_method(JavaThread *current) {
   LinkInfo link_info(ik, vmSymbols::run_method_name(),
                      vmSymbols::extentLocalContainer_run_signature());
   LinkResolver::resolve_static_call(callinfo, link_info, true, current);
-  return callinfo.selected_method();
+  return callinfo.selected_method();   // resolved_method() ?
 }
 
 void JavaThread::runWithExtentLocalBindings(jobject java_thread, jobject bindings, jobject runnable, TRAPS) {

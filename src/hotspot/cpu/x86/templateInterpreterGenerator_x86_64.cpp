@@ -461,14 +461,22 @@ address TemplateInterpreterGenerator::generate_currentThread() {
   return entry_point;
 }
 
+address extentLocalContainer_callout;
 static address extentLocalContainer_run_method;
 
 address  TemplateInterpreterGenerator::generate_java_lang_thread_runWithExtentLocalBindings() {
+  bool foo = __ _should_check_sp;
+  // __ _should_check_sp = false;
+
   address entry = __ pc();
   __ movptr(rcx, Address(r13, 2*wordSize)); // java.lang.Thread
   __ movptr(rdx, Address(r13, 1*wordSize)); // jdk.incubator.concurrent.ExtentLocal$Snapshot
   __ load_heap_oop(rbx, Address(rcx, java_lang_Thread::extentLocalBindings_offset()), rsi);
   __ store_heap_oop(Address(rcx, java_lang_Thread::extentLocalBindings_offset()), rdx, rax, r8, rdi);
+
+  __ movptr(rdx, Address(rsp, 0)); // Return address
+  __ andptr(rsp, -2*wordSize);     // Align
+  __ movptr(Address(rsp, 0), rdx); // Return address
 
   Label OK;
   __ lea(rax, ExternalAddress((address)&extentLocalContainer_run_method));
@@ -492,7 +500,7 @@ address  TemplateInterpreterGenerator::generate_java_lang_thread_runWithExtentLo
   }
   __ bind(OK);
 
-  __ subptr(rsp, 3*wordSize);
+  __ subptr(rsp, 4*wordSize);               // Keep stack 16-aligned
   __ movptr(rdx, Address(r13, 0*wordSize)); // The lambda to call
   __ movptr(Address(rsp, 0*wordSize), rdx);
   __ movptr(Address(rsp, 1*wordSize), rbx); // prev j.i.c.ExtentLocal$Snapshot
@@ -505,20 +513,39 @@ address  TemplateInterpreterGenerator::generate_java_lang_thread_runWithExtentLo
   __ movptr(rax, Address(rbx, Method::from_interpreted_offset()));
   __ call(rax);
 
-  // Calculate prev SP
-  __ movptr(r13, Address(rsp, 2*wordSize));
-  __ addptr(r13, rsp);
+  extentLocalContainer_callout = __ pc();
 
-  __ movptr(rbx, Address(rsp, 1*wordSize)); // prev j.i.c.ExtentLocal$Snapshot
-  __ movptr(rcx, Address(r13, 2*wordSize)); // java.lang.Thread
-  __ store_heap_oop(Address(rcx, java_lang_Thread::extentLocalBindings_offset()),
-                    rbx, rdx, r8, rdi);
-
-  __ movptr(rcx, Address(rsp, 3*wordSize));  // Saved return address
+  __ remove_ExtentLocalBindings(0);
 
   __ mov(rsp, r13);
   __ jmp(rcx);
 
+  Interpreter::_remove_bindings_entry = __ pc();
+
+  // rdx: preserved exception oop
+  __ push_ptr(rax);
+  __ remove_ExtentLocalBindings(wordSize);
+  __ pop_ptr(rax);
+  __ empty_expression_stack();
+  __ restore_bcp();
+
+  Register rarg = c_rarg1;
+  LP64_ONLY(__ mov(c_rarg1, rax));
+
+
+  // find exception handler address and preserve exception oop
+  __ call_VM(rdx,
+             CAST_FROM_FN_PTR(address,
+                          InterpreterRuntime::exception_handler_for_exception),
+             rarg);
+
+  // rax: exception handler entry point
+  // rdx: preserved exception oop
+  // r13/rsi: bcp for exception handler
+  __ push_ptr(rdx); // push exception which is now the only value on the stack
+  __ jmp(rax); // jump to exception handler (may be _remove_activation_entry!)
+
+  __ _should_check_sp = foo;
   return entry;
 }
 

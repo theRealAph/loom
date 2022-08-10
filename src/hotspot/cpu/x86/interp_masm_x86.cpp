@@ -264,7 +264,7 @@ void InterpreterMacroAssembler::call_VM_leaf_base(address entry_point,
   // the ASSERT path (no restore_bcp). Which caused bizarre failures
   // when jvm built with ASSERTs.
 #ifdef ASSERT
-  {
+  if (_should_check_sp) {
     Label L;
     cmpptr(Address(rbp, frame::interpreter_frame_last_sp_offset * wordSize), (int32_t)NULL_WORD);
     jcc(Assembler::equal, L);
@@ -296,7 +296,7 @@ void InterpreterMacroAssembler::call_VM_base(Register oop_result,
   NOT_LP64(assert(java_thread == noreg , "not expecting a precomputed java thread");)
   save_bcp();
 #ifdef ASSERT
-  {
+  if (_should_check_sp) {
     Label L;
     cmpptr(Address(rbp, frame::interpreter_frame_last_sp_offset * wordSize), (int32_t)NULL_WORD);
     jcc(Assembler::equal, L);
@@ -2062,4 +2062,18 @@ void InterpreterMacroAssembler::notify_method_exit(
                  rthread, rarg);
     pop(state);
   }
+}
+
+void InterpreterMacroAssembler::remove_ExtentLocalBindings(size_t stack_offset) {
+  // Calculate prev SP
+  movptr(r13, Address(rsp, 2*wordSize +  stack_offset));
+  addptr(r13, rsp);
+  addptr(r13, stack_offset);
+
+  movptr(rbx, Address(rsp, 1*wordSize + stack_offset)); // prev j.i.c.ExtentLocal$Snapshot
+  movptr(rcx, Address(r13, 2*wordSize)); // java.lang.Thread
+  store_heap_oop(Address(rcx, java_lang_Thread::extentLocalBindings_offset()),
+                 rbx, rdx, r8, rdi);
+
+  movptr(rcx, Address(rsp, 4*wordSize +  stack_offset));  // Saved return address
 }
