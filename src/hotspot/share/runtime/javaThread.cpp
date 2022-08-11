@@ -204,6 +204,20 @@ Method *JavaThread::extentLocalContainer_run_method(JavaThread *current) {
   return callinfo.selected_method();   // resolved_method() ?
 }
 
+Method *JavaThread::extentLocalContainer_call_method(JavaThread *current) {
+  // assert(current == JavaThread::current(), "Must be");
+  MACOS_AARCH64_ONLY(ThreadWXEnable __wx(WXWrite, current));
+  ThreadInVMfromJava __tiv(current);
+  VM_ENTRY_BASE(Method *, , current);
+  debug_only(VMEntryWrapper __vew;)
+  InstanceKlass* ik = InstanceKlass::cast(SystemDictionary::resolve_or_fail(vmSymbols::extentLocalContainer(), true, current));
+  CallInfo callinfo;
+  LinkInfo link_info(ik, vmSymbols::call_method_name(),
+                     vmSymbols::extentLocalContainer_call_signature());
+  LinkResolver::resolve_static_call(callinfo, link_info, true, current);
+  return callinfo.selected_method();   // resolved_method() ?
+}
+
 void JavaThread::runWithExtentLocalBindings(jobject java_thread, jobject bindings, jobject runnable, TRAPS) {
   JavaValue result(T_VOID);
   InstanceKlass* ik = InstanceKlass::cast(SystemDictionary::resolve_or_fail(vmSymbols::extentLocalContainer(), true, this));

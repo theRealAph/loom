@@ -2066,7 +2066,8 @@ void InterpreterMacroAssembler::notify_method_exit(
 
 address InterpreterMacroAssembler
 ::invoke_WithExtentLocalBindings(address *extentLocalContainer_run_method,
-                                 address *extentLocalContainer_call_site) {
+                                 address *extentLocalContainer_call_site,
+                                 address method_to_invoke) {
   address entry = pc();
 
   // j_rarg0 is live
@@ -2090,7 +2091,7 @@ address InterpreterMacroAssembler
     set_last_Java_frame(r15_thread, noreg, rbp, NULL);
 
     mov(c_rarg0, r15_thread);
-    call(RuntimeAddress(CAST_FROM_FN_PTR(address, JavaThread::extentLocalContainer_run_method)));
+    call(RuntimeAddress(CAST_FROM_FN_PTR(address, method_to_invoke)));
     lea(j_rarg1, ExternalAddress((address)extentLocalContainer_run_method));
     movptr(Address(j_rarg1, 0), rax);
 
