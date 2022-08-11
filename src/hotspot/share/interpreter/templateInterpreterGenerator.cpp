@@ -224,6 +224,7 @@ void TemplateInterpreterGenerator::generate_all() {
   method_entry(java_lang_Double_doubleToRawLongBits);
 
   method_entry(java_lang_thread_runWithExtentLocalBindings)
+  method_entry(java_lang_thread_callWithExtentLocalBindings)
   method_entry(java_lang_continuation_doYield)
 
 #undef method_entry

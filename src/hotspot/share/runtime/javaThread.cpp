@@ -219,6 +219,7 @@ Method *JavaThread::extentLocalContainer_call_method(JavaThread *current) {
 }
 
 void JavaThread::runWithExtentLocalBindings(jobject java_thread, jobject bindings, jobject runnable, TRAPS) {
+  abort();
   JavaValue result(T_VOID);
   InstanceKlass* ik = InstanceKlass::cast(SystemDictionary::resolve_or_fail(vmSymbols::extentLocalContainer(), true, this));
   // Do we need this?
@@ -241,6 +242,7 @@ void JavaThread::runWithExtentLocalBindings(jobject java_thread, jobject binding
 }
 
 oop JavaThread::callWithExtentLocalBindings(jobject java_thread, jobject bindings, jobject callable, TRAPS) {
+  abort();
   JavaValue result(T_OBJECT);
   InstanceKlass* ik = InstanceKlass::cast(SystemDictionary::resolve_or_fail(vmSymbols::extentLocalContainer(), true, this));
   // Do we need this?
