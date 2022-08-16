@@ -212,7 +212,7 @@ class InterpreterMacroAssembler: public MacroAssembler {
   void prepare_to_jump_from_interpreted();
   void jump_from_interpreted(Register method, Register temp);
 
-  address invoke_WithExtentLocalBindings(address *extentLocalContainer_run_method,
+  address invoke_withExtentLocalBindings(address *extentLocalContainer_run_method,
                                          address *extentLocalContainer_call_site,
                                          address method_to_invoke);
   // narrow int return value

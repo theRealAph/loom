@@ -9287,9 +9287,10 @@ void MacroAssembler::generate_fill_avx3(BasicType type, Register to, Register va
 #ifdef _LP64
 
 void MacroAssembler
-::invoke_WithExtentLocalBindings(address *extentLocalContainer_run_method,
+::invoke_withExtentLocalBindings(address *extentLocalContainer_run_method,
                                  address *extentLocalContainer_call_site,
                                  address method_to_invoke,
+                                 ByteSize offset_to_entry_point,
                                  bool remove_bindings_entry) {
   address entry = pc();
 
@@ -9335,7 +9336,7 @@ void MacroAssembler
   // Call interpreter entry with our outgoing arg
   mov(r13, rsp);
   mov(rbx, rax); // Method*
-  movptr(rax, Address(rbx, Method::from_interpreted_offset()));
+  movptr(rax, Address(rbx, offset_to_entry_point));
   call(rax);
 
   *extentLocalContainer_call_site = pc();

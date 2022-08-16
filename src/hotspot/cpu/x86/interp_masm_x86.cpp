@@ -2065,7 +2065,7 @@ void InterpreterMacroAssembler::notify_method_exit(
 }
 
 address InterpreterMacroAssembler
-    ::invoke_WithExtentLocalBindings(address *extentLocalContainer_run_method,
+    ::invoke_withExtentLocalBindings(address *extentLocalContainer_run_method,
                                      address *extentLocalContainer_call_site,
                                      address method_to_invoke) {
   address entry = pc();
@@ -2074,9 +2074,11 @@ address InterpreterMacroAssembler
   movptr(j_rarg1, Address(r13, 1*wordSize)); // jdk.incubator.concurrent.ExtentLocal$Snapshot
   movptr(j_rarg2, Address(r13, 2*wordSize)); // java.lang.Thread
   MacroAssembler
-    ::invoke_WithExtentLocalBindings(extentLocalContainer_run_method,
+    ::invoke_withExtentLocalBindings(extentLocalContainer_run_method,
                                      extentLocalContainer_call_site,
-                                     method_to_invoke, /*remove_bindings_entry*/true);
+                                     method_to_invoke,
+                                     Method::from_interpreted_offset(),
+                                     /*remove_bindings_entry*/true);
   empty_expression_stack();
   restore_bcp();
 

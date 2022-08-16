@@ -2036,9 +2036,10 @@ public:
   void remove_ExtentLocalBindings(size_t stack_offset,
      Register result,
      Register tmp1, Register tmp2, Register tmp3, Register tmp4, Register tmp5);
-  void invoke_WithExtentLocalBindings(address *extentLocalContainer_run_method,
+  void invoke_withExtentLocalBindings(address *extentLocalContainer_run_method,
                                       address *extentLocalContainer_call_site,
                                       address method_to_invoke,
+                                      ByteSize offset_to_entry_point,
                                       bool remove_bindings_entry = false);
 
   void convert_f2i(Register dst, XMMRegister src);
