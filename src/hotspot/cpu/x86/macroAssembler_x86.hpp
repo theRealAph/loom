@@ -2033,6 +2033,14 @@ public:
   void fill64(Register dst, int dis, XMMRegister xmm, bool use64byteVector = false);
 
 #ifdef _LP64
+  void remove_ExtentLocalBindings(size_t stack_offset,
+     Register result,
+     Register tmp1, Register tmp2, Register tmp3, Register tmp4, Register tmp5);
+  void invoke_WithExtentLocalBindings(address *extentLocalContainer_run_method,
+                                      address *extentLocalContainer_call_site,
+                                      address method_to_invoke,
+                                      bool remove_bindings_entry = false);
+
   void convert_f2i(Register dst, XMMRegister src);
   void convert_d2i(Register dst, XMMRegister src);
   void convert_f2l(Register dst, XMMRegister src);
