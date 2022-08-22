@@ -738,7 +738,16 @@ public:
   // Continuation
   bool is_continuation_enter_intrinsic() const { return intrinsic_id() == vmIntrinsics::_Continuation_enterSpecial; }
 
-  bool is_special_native_intrinsic() const { return is_method_handle_intrinsic() || is_continuation_enter_intrinsic(); }
+  bool is_ExtentLocalBindings_intrinsic() const {
+    return (intrinsic_id() == vmIntrinsics::_callWithExtentLocalBindings ||
+            intrinsic_id() == vmIntrinsics::_runWithExtentLocalBindings);
+  }
+
+  bool is_special_native_intrinsic() const {
+    return (is_method_handle_intrinsic() ||
+            is_continuation_enter_intrinsic() ||
+            is_ExtentLocalBindings_intrinsic());
+  }
 
   static Klass* check_non_bcp_klass(Klass* klass);
 

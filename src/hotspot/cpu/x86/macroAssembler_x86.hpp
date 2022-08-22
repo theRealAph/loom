@@ -2041,6 +2041,7 @@ public:
                                       address method_to_invoke,
                                       ByteSize offset_to_entry_point,
                                       bool remove_bindings_entry = false);
+  void invoke_withExtentLocalBindings(Method *method);
 
   void convert_f2i(Register dst, XMMRegister src);
   void convert_d2i(Register dst, XMMRegister src);

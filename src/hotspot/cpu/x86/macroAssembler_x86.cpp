@@ -4994,24 +4994,24 @@ void MacroAssembler::store_klass_gap(Register dst, Register src) {
 
 #ifdef ASSERT
 void MacroAssembler::verify_heapbase(const char* msg) {
-  assert (UseCompressedOops, "should be compressed");
-  assert (Universe::heap() != NULL, "java heap should be initialized");
-  if (CheckCompressedOops) {
-    Label ok;
-    const auto src2 = ExternalAddress((address)CompressedOops::ptrs_base_addr());
-    assert(!src2.is_lval(), "should not be lval");
-    const bool is_src2_reachable = reachable(src2);
-    if (!is_src2_reachable) {
-      push(rscratch1);  // cmpptr trashes rscratch1
-    }
-    cmpptr(r12_heapbase, src2);
-    jcc(Assembler::equal, ok);
-    STOP(msg);
-    bind(ok);
-    if (!is_src2_reachable) {
-      pop(rscratch1);
-    }
-  }
+  // assert (UseCompressedOops, "should be compressed");
+  // assert (Universe::heap() != NULL, "java heap should be initialized");
+  // if (CheckCompressedOops) {
+  //   Label ok;
+  //   const auto src2 = ExternalAddress((address)CompressedOops::ptrs_base_addr());
+  //   assert(!src2.is_lval(), "should not be lval");
+  //   const bool is_src2_reachable = reachable(src2);
+  //   if (!is_src2_reachable) {
+  //     push(rscratch1);  // cmpptr trashes rscratch1
+  //   }
+  //   cmpptr(r12_heapbase, src2);
+  //   jcc(Assembler::equal, ok);
+  //   STOP(msg);
+  //   bind(ok);
+  //   if (!is_src2_reachable) {
+  //     pop(rscratch1);
+  //   }
+  // }
 }
 #endif
 
@@ -9296,7 +9296,7 @@ void MacroAssembler
 
   // j_rarg0: Callable
   // j_rarg1: java.lang.Thread
-  // j_rarg3: jdk.incubator.concurrent.ExtentLocal$Snapshot
+  // j_rarg2: jdk.incubator.concurrent.ExtentLocal$Snapshot
 
   load_heap_oop(rbx, Address(j_rarg2, java_lang_Thread::extentLocalBindings_offset()), rsi);
   store_heap_oop(Address(j_rarg2, java_lang_Thread::extentLocalBindings_offset()), j_rarg1, rax, j_rarg3, j_rarg5);
@@ -9344,15 +9344,71 @@ void MacroAssembler
   // rax/xmm0 is live with the result of the call
   remove_ExtentLocalBindings(0, /*new sp*/r13, /*temps*/j_rarg2, rbx, j_rarg1, j_rarg3, j_rarg5);
 
+}
+
+void MacroAssembler
+::invoke_withExtentLocalBindings(Method *method) {
+  address entry = pc();
+
+  Label around, RUN_METHOD;
+  {
+    jmp(around);
+    align(3);
+    bind(RUN_METHOD);
+    emit_int64(0);
+    bind(around);
+  }
+
+  // j_rarg0: Callable
+  // j_rarg1: java.lang.Thread
+  // j_rarg3: jdk.incubator.concurrent.ExtentLocal$Snapshot
+
+  load_heap_oop(rbx, Address(j_rarg2, java_lang_Thread::extentLocalBindings_offset()), rsi);
+  store_heap_oop(Address(j_rarg2, java_lang_Thread::extentLocalBindings_offset()), j_rarg1, rax, j_rarg3, j_rarg5);
+
+  movptr(j_rarg1, Address(rsp, 0)); // Return address
+  andptr(rsp, -2*wordSize);         // Align
+  movptr(Address(rsp, 0), j_rarg1); // Return address
+
+  subptr(rsp, 4*wordSize);               // Keep stack 16-aligned
+  movptr(Address(rsp, 0*wordSize), j_rarg0); // The lambda to call
+  movptr(Address(rsp, 1*wordSize), rbx); // prev j.i.c.ExtentLocal$Snapshot
+  subptr(r13, rsp);
+  movptr(Address(rsp, 2*wordSize), r13); // offset to sender sp
+
+  Label NAK, NAK_RET;
+  bind(NAK_RET);
+  movptr(rax, InternalAddress(target(RUN_METHOD)));
+  orptr(rax, rax);
+  jcc(Assembler::zero, NAK);
+
+  // Call interpreter entry with our outgoing arg
+  mov(r13, rsp);
+  mov(rbx, rax); // Method*
+  movptr(rax, Address(rbx, Method::from_interpreted_offset()));
+  call(rax);
+
+  // rax/xmm0 is live with the result of the call
+  remove_ExtentLocalBindings(0, /*new sp*/r13, /*temps*/j_rarg2, rbx, j_rarg1, j_rarg3, j_rarg5);
+
+  movptr(j_rarg2, Address(rsp, 4*wordSize));  // Saved return address
   mov(rsp, r13);
   jmp(j_rarg2);
 
-  if (remove_bindings_entry) {
-    AbstractInterpreter::_remove_bindings_entry = pc();
-  }
+  bind(NAK);
+  push_call_clobbered_registers();
+  set_last_Java_frame(r15_thread, noreg, rbp, NULL);
 
-  // j_rarg1: preserved exception oop
-  remove_ExtentLocalBindings(0, /*new sp*/r13, /*temps*/j_rarg2, rbx, j_rarg1, j_rarg3, j_rarg5);
+  mov(c_rarg0, r15_thread);
+  call(RuntimeAddress((address)JavaThread::extentLocalContainer_run_method));
+
+  lea(j_rarg1, InternalAddress(target(RUN_METHOD)));
+  movptr(Address(j_rarg1, 0), rax);
+
+  pop_call_clobbered_registers();
+  reset_last_Java_frame(true);
+
+  jmp(NAK_RET);
 }
 
 void MacroAssembler::remove_ExtentLocalBindings(size_t stack_offset,
@@ -9367,8 +9423,6 @@ void MacroAssembler::remove_ExtentLocalBindings(size_t stack_offset,
   movptr(tmp1, Address(result, 2*wordSize)); // java.lang.Thread
   store_heap_oop(Address(tmp1, java_lang_Thread::extentLocalBindings_offset()),
                  tmp2, tmp3, tmp4, tmp5);
-
-  movptr(tmp1, Address(rsp, 4*wordSize +  stack_offset));  // Saved return address
 }
 
 void MacroAssembler::convert_f2i(Register dst, XMMRegister src) {

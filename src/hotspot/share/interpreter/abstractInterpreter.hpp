@@ -125,8 +125,6 @@ class AbstractInterpreter: AllStatic {
 
   static address    _rethrow_exception_entry;                   // rethrows an activation in previous frame
 
-  static address _remove_bindings_entry;
-
   friend class      AbstractInterpreterGenerator;
   friend class      InterpreterMacroAssembler;
 
@@ -134,6 +132,8 @@ class AbstractInterpreter: AllStatic {
   // Initialization/debugging
   static void       initialize();
   static StubQueue* code()                                      { return _code; }
+
+  static address _remove_bindings_entry;
 
 
   // Method activation

@@ -191,17 +191,24 @@ void JavaThread::set_extentLocalCache(oop p) {
 }
 
 Method *JavaThread::extentLocalContainer_run_method(JavaThread *current) {
+  static Method *the_method;
+  if (the_method)   return the_method;
+
   // assert(current == JavaThread::current(), "Must be");
-  MACOS_AARCH64_ONLY(ThreadWXEnable __wx(WXWrite, current));
-  ThreadInVMfromJava __tiv(current);
-  VM_ENTRY_BASE(Method *, , current);
-  debug_only(VMEntryWrapper __vew;)
+  if (current->thread_state() == _thread_in_Java) {
+    MACOS_AARCH64_ONLY(ThreadWXEnable __wx(WXWrite, current));
+    ThreadInVMfromJava __tiv(current);
+    VM_ENTRY_BASE(Method *, , current);
+    debug_only(VMEntryWrapper __vew;)
+    return extentLocalContainer_run_method(current);
+  }
+
   InstanceKlass* ik = InstanceKlass::cast(SystemDictionary::resolve_or_fail(vmSymbols::extentLocalContainer(), true, current));
   CallInfo callinfo;
   LinkInfo link_info(ik, vmSymbols::run_method_name(),
                      vmSymbols::extentLocalContainer_run_signature());
   LinkResolver::resolve_static_call(callinfo, link_info, true, current);
-  return callinfo.selected_method();   // resolved_method() ?
+  return the_method = callinfo.selected_method();   // resolved_method() ?
 }
 
 Method *JavaThread::extentLocalContainer_call_method(JavaThread *current) {

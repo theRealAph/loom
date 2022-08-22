@@ -3065,7 +3065,8 @@ void AdapterHandlerLibrary::create_native_wrapper(const methodHandle& method) {
     if (buf != NULL) {
       CodeBuffer buffer(buf);
 
-      if (method->is_continuation_enter_intrinsic()) {
+      if (method->is_continuation_enter_intrinsic()
+          || method->is_ExtentLocalBindings_intrinsic()) {
         buffer.initialize_stubs_size(64);
       }
 

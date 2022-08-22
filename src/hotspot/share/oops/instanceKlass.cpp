@@ -943,6 +943,14 @@ void InstanceKlass::link_methods(TRAPS) {
     methodHandle m(THREAD, methods()->at(i));
 
     // Set up method entry points for compiler and interpreter    .
+    ResourceMark rm;
+
+    char *name = m->name_and_sig_as_C_string();
+    if (! strcmp("java.lang.Thread.callWithExtentLocalBindings(Ljava/lang/Thread;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", name)) {
+      fprintf(stderr, "%s\n", name);
+    }
+    if (! strcmp("java.lang.Thread.yield0()V", name)) {
+    }
     m->link_method(m, CHECK);
   }
 }

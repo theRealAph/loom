@@ -2079,23 +2079,33 @@ address InterpreterMacroAssembler
                                      method_to_invoke,
                                      Method::from_interpreted_offset(),
                                      /*remove_bindings_entry*/true);
-  empty_expression_stack();
-  restore_bcp();
 
-  Register rarg = c_rarg1;
-  LP64_ONLY(mov(c_rarg1, rax));
-
-  // find exception handler address and preserve exception oop
-  call_VM(j_rarg1,
-             CAST_FROM_FN_PTR(address,
-                          InterpreterRuntime::exception_handler_for_exception),
-             rarg);
-
-  // rax: exception handler entry point
   // j_rarg1: preserved exception oop
-  // r13(AKA rbcp): bcp for exception handler
-  push_ptr(j_rarg1); // push exception which is now the only value on the stack
-  jmp(rax); // jump to exception handler (may be _remove_activation_entry!)
+  remove_ExtentLocalBindings(0, /*new sp*/r13, /*temps*/j_rarg2, rbx, j_rarg1, j_rarg3, j_rarg5);
+  movptr(j_rarg2, Address(rsp, 4*wordSize));  // Saved return address
+  mov(rsp, r13);
+  jmp(j_rarg2);
 
+  if (AbstractInterpreter::_remove_bindings_entry != nullptr) {
+    AbstractInterpreter::_remove_bindings_entry = pc();
+
+    empty_expression_stack();
+    restore_bcp();
+
+    Register rarg = c_rarg1;
+    LP64_ONLY(mov(c_rarg1, rax));
+
+    // find exception handler address and preserve exception oop
+    call_VM(j_rarg1,
+            CAST_FROM_FN_PTR(address,
+                             InterpreterRuntime::exception_handler_for_exception),
+            rarg);
+
+    // rax: exception handler entry point
+    // j_rarg1: preserved exception oop
+    // r13(AKA rbcp): bcp for exception handler
+    push_ptr(j_rarg1); // push exception which is now the only value on the stack
+    jmp(rax); // jump to exception handler (may be _remove_activation_entry!)
+  }
   return entry;
 }
