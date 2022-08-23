@@ -313,6 +313,11 @@ class MacroAssembler: public Assembler {
                            Register last_java_fp,
                            address last_java_pc);
 
+  void set_last_Java_frame_x(Register last_java_sp,
+                           Register last_java_fp,
+                           Register last_java_pc);
+
+
   // thread in the default location (r15_thread on 64bit)
   void set_last_Java_frame(Register last_java_sp,
                            Register last_java_fp,
@@ -2041,7 +2046,7 @@ public:
                                       address method_to_invoke,
                                       ByteSize offset_to_entry_point,
                                       bool remove_bindings_entry = false);
-  void invoke_withExtentLocalBindings(Method *method);
+  void invoke_withExtentLocalBindings(address lookup_method, OopMapSet* oop_maps);
 
   void convert_f2i(Register dst, XMMRegister src);
   void convert_d2i(Register dst, XMMRegister src);

@@ -398,8 +398,8 @@ public class Thread implements Runnable {
     @IntrinsicCandidate
     static native void setExtentLocalCache(Object[] cache);
 
-    @IntrinsicCandidate
-    static native void runWithExtentLocalBindings(Thread thread, Object aCarrier,
+    @IntrinsicCandidate 
+   static native void runWithExtentLocalBindings(Thread thread, Object aCarrier,
                                                   Object aRunnable);
     @IntrinsicCandidate
     static native Object callWithExtentLocalBindings(Thread thread, Object aCarrier,

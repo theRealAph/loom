@@ -1508,15 +1508,19 @@ nmethod* SharedRuntime::generate_native_wrapper(MacroAssembler* masm,
     int frame_complete = 0;
     int stack_slots = 0;
     OopMapSet* oop_maps =  new OopMapSet();
-    __ invoke_withExtentLocalBindings
-      (NULL);
+    address lookup_method =
+      address(iid == vmIntrinsicID::_callWithExtentLocalBindings
+              ? JavaThread::extentLocalContainer_call_method
+              : JavaThread::extentLocalContainer_run_method);
+    __ invoke_withExtentLocalBindings(lookup_method, oop_maps);
     __ flush();
+
     nmethod* nm = nmethod::new_native_nmethod(method,
                                               compile_id,
                                               masm->code(),
                                               vep_offset,
                                               frame_complete,
-                                              stack_slots,
+                                              /* stack_slots */6,
                                               in_ByteSize(-1),
                                               in_ByteSize(-1),
                                               oop_maps,

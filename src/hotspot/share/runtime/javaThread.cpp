@@ -211,6 +211,8 @@ Method *JavaThread::extentLocalContainer_run_method(JavaThread *current) {
   return the_method = callinfo.selected_method();   // resolved_method() ?
 }
 
+extern "C" JNIEXPORT void pfl();
+
 Method *JavaThread::extentLocalContainer_call_method(JavaThread *current) {
   // assert(current == JavaThread::current(), "Must be");
   MACOS_AARCH64_ONLY(ThreadWXEnable __wx(WXWrite, current));
@@ -222,6 +224,7 @@ Method *JavaThread::extentLocalContainer_call_method(JavaThread *current) {
   LinkInfo link_info(ik, vmSymbols::call_method_name(),
                      vmSymbols::extentLocalContainer_call_signature());
   LinkResolver::resolve_static_call(callinfo, link_info, true, current);
+  pfl();
   return callinfo.selected_method();   // resolved_method() ?
 }
 

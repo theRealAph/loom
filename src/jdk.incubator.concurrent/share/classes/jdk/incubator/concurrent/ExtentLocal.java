@@ -335,7 +335,6 @@ public final class ExtentLocal<T> {
                 setExtentLocalCache(null); // Cache.invalidate();
                 throw t;
             } finally {
-                setExtentLocalBindings(prevBindings);
                 Cache.invalidate(bitmask);
             }
         }
@@ -367,7 +366,6 @@ public final class ExtentLocal<T> {
                 setExtentLocalCache(null); // Cache.invalidate();
                 throw t;
             } finally {
-                setExtentLocalBindings(prevBindings);
                 Cache.invalidate(bitmask);
             }
         }

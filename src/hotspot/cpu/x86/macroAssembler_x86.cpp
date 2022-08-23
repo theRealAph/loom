@@ -724,6 +724,15 @@ void MacroAssembler::reset_last_Java_frame(bool clear_fp) {
   reset_last_Java_frame(r15_thread, clear_fp);
 }
 
+void MacroAssembler::set_last_Java_frame_x(Register last_java_sp,
+                                         Register last_java_fp,
+                                         Register last_java_pc) {
+  Address java_pc(r15_thread,
+                  JavaThread::frame_anchor_offset() + JavaFrameAnchor::last_Java_pc_offset());
+  movptr(java_pc, last_java_pc);
+  set_last_Java_frame(last_java_sp, last_java_fp, NULL);
+}
+
 void MacroAssembler::set_last_Java_frame(Register last_java_sp,
                                          Register last_java_fp,
                                          address  last_java_pc) {
@@ -9346,9 +9355,17 @@ void MacroAssembler
 
 }
 
+void barf() { asm("nop"); }
+
 void MacroAssembler
-::invoke_withExtentLocalBindings(Method *method) {
+::invoke_withExtentLocalBindings(address lookup_method, OopMapSet* oop_maps) {
   address entry = pc();
+
+  pop(r8);
+  set_last_Java_frame_x(rsp, rbp, r8);
+  push(r8);
+  call(RuntimeAddress((address)barf));
+  reset_last_Java_frame(true);
 
   Label around, RUN_METHOD;
   {
@@ -9359,48 +9376,56 @@ void MacroAssembler
     bind(around);
   }
 
-  // j_rarg0: Callable
-  // j_rarg1: java.lang.Thread
-  // j_rarg3: jdk.incubator.concurrent.ExtentLocal$Snapshot
+  // j_rarg0: java.lang.Thread
+  // j_rarg1: jdk.incubator.concurrent.ExtentLocal$Snapshot
+  // j_rarg2: Callable
 
-  load_heap_oop(rbx, Address(j_rarg2, java_lang_Thread::extentLocalBindings_offset()), rsi);
-  store_heap_oop(Address(j_rarg2, java_lang_Thread::extentLocalBindings_offset()), j_rarg1, rax, j_rarg3, j_rarg5);
+  subptr(rsp, 5*wordSize);               // Keep stack 16-aligned
+  movptr(Address(rsp, 4*wordSize), rbp); // Everything saves ebp
+  movptr(Address(rsp, 0*wordSize), j_rarg2); // The lambda to call
 
-  movptr(j_rarg1, Address(rsp, 0)); // Return address
-  andptr(rsp, -2*wordSize);         // Align
-  movptr(Address(rsp, 0), j_rarg1); // Return address
-
-  subptr(rsp, 4*wordSize);               // Keep stack 16-aligned
-  movptr(Address(rsp, 0*wordSize), j_rarg0); // The lambda to call
+  load_heap_oop(rbx, Address(j_rarg0, java_lang_Thread::extentLocalBindings_offset()), rsi);
   movptr(Address(rsp, 1*wordSize), rbx); // prev j.i.c.ExtentLocal$Snapshot
+
+  store_heap_oop(Address(j_rarg1, java_lang_Thread::extentLocalBindings_offset()), rbx, rax, j_rarg3, j_rarg5);
+
   subptr(r13, rsp);
   movptr(Address(rsp, 2*wordSize), r13); // offset to sender sp
 
   Label NAK, NAK_RET;
   bind(NAK_RET);
-  movptr(rax, InternalAddress(target(RUN_METHOD)));
-  orptr(rax, rax);
+  movptr(rbx, InternalAddress(target(RUN_METHOD)));
+  orptr(rbx, rbx);
   jcc(Assembler::zero, NAK);
 
-  // Call interpreter entry with our outgoing arg
-  mov(r13, rsp);
-  mov(rbx, rax); // Method*
-  movptr(rax, Address(rbx, Method::from_interpreted_offset()));
+  // Call compiled entry with our outgoing arg
+  // mov(r13, rsp);
+  movptr(rax, Address(rbx, Method::from_compiled_offset()));
+  movptr(j_rarg0, Address(rsp, 0*wordSize)); // The lambda to call
   call(rax);
-
+  {
+    OopMap* oop_map = new OopMap(/* frame_size_in_slots */12, 0);
+    oop_maps->add_gc_map(offset(), oop_map);
+  }
   // rax/xmm0 is live with the result of the call
   remove_ExtentLocalBindings(0, /*new sp*/r13, /*temps*/j_rarg2, rbx, j_rarg1, j_rarg3, j_rarg5);
 
-  movptr(j_rarg2, Address(rsp, 4*wordSize));  // Saved return address
-  mov(rsp, r13);
+  movptr(j_rarg2, Address(rsp, 5*wordSize));  // Saved return address
+  addptr(rsp, 6*wordSize);
+  // mov(rsp, r13);
   jmp(j_rarg2);
 
   bind(NAK);
+  address the_pc = pc();
+  {
+    OopMap* oop_map = new OopMap(/* frame_size_in_slots */64, 0);
+    oop_maps->add_gc_map(offset(), oop_map);
+  }
+  set_last_Java_frame(r15_thread, noreg, rbp, the_pc);
   push_call_clobbered_registers();
-  set_last_Java_frame(r15_thread, noreg, rbp, NULL);
 
   mov(c_rarg0, r15_thread);
-  call(RuntimeAddress((address)JavaThread::extentLocalContainer_run_method));
+  call(RuntimeAddress(lookup_method));
 
   lea(j_rarg1, InternalAddress(target(RUN_METHOD)));
   movptr(Address(j_rarg1, 0), rax);
