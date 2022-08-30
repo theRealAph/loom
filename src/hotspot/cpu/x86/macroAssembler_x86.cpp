@@ -9322,6 +9322,11 @@ void MacroAssembler
 
   store_heap_oop(Address(j_rarg0, java_lang_Thread::extentLocalBindings_offset()), j_rarg1, rax, j_rarg3, j_rarg5);
 
+  OopMap* map = new OopMap(/* frame_size_in_slots */12, 0);
+  map->set_oop(VMRegImpl::stack2reg(0)); // The lambda to call
+  map->set_oop(VMRegImpl::stack2reg(2)); // prev j.i.c.ExtentLocal$Snapshot
+  map->set_oop(VMRegImpl::stack2reg(4)); // java.lang.Thread
+
   Label NAK, NAK_RET;
   bind(NAK_RET);
   movptr(rbx, InternalAddress(target(RUN_METHOD)));
@@ -9332,11 +9337,9 @@ void MacroAssembler
   // mov(r13, rsp);
   movptr(rax, Address(rbx, Method::from_compiled_offset()));
   movptr(j_rarg0, Address(rsp, 0*wordSize)); // The lambda to call
+
   call(rax);
-  {
-    OopMap* oop_map = new OopMap(/* frame_size_in_slots */12, 0);
-    oop_maps->add_gc_map(offset(), oop_map);
-  }
+  oop_maps->add_gc_map(offset(), map->deep_copy());
 
   // rax/xmm0 is live with the result of the call
   remove_ExtentLocalBindings(0, /*new sp*/r13, /*temps*/j_rarg2, rbx, j_rarg1, j_rarg3, j_rarg5);
@@ -9349,10 +9352,7 @@ void MacroAssembler
 
   bind(NAK);
   address the_pc = pc();
-  {
-    OopMap* oop_map = new OopMap(/* frame_size_in_slots */64, 0);
-    oop_maps->add_gc_map(offset(), oop_map);
-  }
+  oop_maps->add_gc_map(offset(), map->deep_copy());
   set_last_Java_frame(r15_thread, noreg, rbp, the_pc);
   push_call_clobbered_registers();
 
@@ -9369,11 +9369,7 @@ void MacroAssembler
 
   // Exception entry
   exception_offset = pc() - entry;
-
-  {
-    OopMap* oop_map = new OopMap(/* frame_size_in_slots */64, 0);
-    oop_maps->add_gc_map(offset(), oop_map);
-  }
+  oop_maps->add_gc_map(offset(), map);
   set_last_Java_frame(r15_thread, noreg, rbp, pc());
   call(RuntimeAddress((address)barf));
   reset_last_Java_frame(true);
