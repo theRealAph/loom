@@ -327,13 +327,10 @@ public final class ExtentLocal<T> {
         public <R> R call(Callable<R> op) throws Exception {
             Objects.requireNonNull(op);
             Cache.invalidate(bitmask);
-            var prevBindings = addExtentLocalBindings(this);
+            var prevBindings =  extentLocalBindings();
             var snapshot = new Snapshot(this, prevBindings);
             try {
                 return (R)JLA.callWithExtentLocalBindings(Thread.currentThread(), snapshot, op);
-            } catch (Throwable t) {
-                setExtentLocalCache(null); // Cache.invalidate();
-                throw t;
             } finally {
                 Cache.invalidate(bitmask);
             }
@@ -362,9 +359,6 @@ public final class ExtentLocal<T> {
             try {
                 JLA.runWithExtentLocalBindings(Thread.currentThread(), snapshot, op);
                 // ExtentLocalContainer.run(op);
-            } catch (Throwable t) {
-                setExtentLocalCache(null); // Cache.invalidate();
-                throw t;
             } finally {
                 Cache.invalidate(bitmask);
             }
@@ -676,6 +670,11 @@ public final class ExtentLocal<T> {
             cache[n * 2 + 1] = value;
         }
 
+        private static void setKeyAndObjectAt(Object[] cache, int n, Object key, Object value) {
+            cache[n * 2] = key;
+            cache[n * 2 + 1] = value;
+        }
+
         private static Object getKey(Object[] objs, int n) {
             return objs[n * 2];
         }
@@ -709,7 +708,7 @@ public final class ExtentLocal<T> {
             if ((objects = extentLocalCache()) != null) {
                 for (int bits = toClearBits; bits != 0; ) {
                     int index = Integer.numberOfTrailingZeros(bits);
-                    setKeyAndObjectAt(index & SLOT_MASK, null, null);
+                    setKeyAndObjectAt(objects, index & SLOT_MASK, null, null);
                     bits &= ~1 << index;
                 }
             }

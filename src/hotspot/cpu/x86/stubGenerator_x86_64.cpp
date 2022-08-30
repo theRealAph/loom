@@ -465,25 +465,25 @@ class StubGenerator: public StubCodeGenerator {
     const Address rsp_after_call(rbp, rsp_after_call_off * wordSize);
     const Address thread        (rbp, thread_off         * wordSize);
 
-#ifdef ASSERT
-    // verify that threads correspond
-    {
-      Label L1, L2, L3;
-      __ cmpptr(r15_thread, thread);
-      __ jcc(Assembler::equal, L1);
-      __ stop("StubRoutines::catch_exception: r15_thread is corrupted");
-      __ bind(L1);
-      __ get_thread(rbx);
-      __ cmpptr(r15_thread, thread);
-      __ jcc(Assembler::equal, L2);
-      __ stop("StubRoutines::catch_exception: r15_thread is modified by call");
-      __ bind(L2);
-      __ cmpptr(r15_thread, rbx);
-      __ jcc(Assembler::equal, L3);
-      __ stop("StubRoutines::catch_exception: threads must correspond");
-      __ bind(L3);
-    }
-#endif
+// #ifdef ASSERT
+//     // verify that threads correspond
+//     {
+//       Label L1, L2, L3;
+//       __ cmpptr(r15_thread, thread);
+//       __ jcc(Assembler::equal, L1);
+//       __ stop("StubRoutines::catch_exception: r15_thread is corrupted");
+//       __ bind(L1);
+//       __ get_thread(rbx);
+//       __ cmpptr(r15_thread, thread);
+//       __ jcc(Assembler::equal, L2);
+//       __ stop("StubRoutines::catch_exception: r15_thread is modified by call");
+//       __ bind(L2);
+//       __ cmpptr(r15_thread, rbx);
+//       __ jcc(Assembler::equal, L3);
+//       __ stop("StubRoutines::catch_exception: threads must correspond");
+//       __ bind(L3);
+//     }
+// #endif
 
     // set pending exception
     __ verify_oop(rax);

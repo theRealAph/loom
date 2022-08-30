@@ -1092,9 +1092,9 @@ void LinkResolver::resolve_static_call(CallInfo& result,
   ResourceMark rm;
 
   char *name = resolved_method->name_and_sig_as_C_string();
-  if (! strcmp("java.lang.Thread.callWithExtentLocalBindings(Ljava/lang/Thread;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", name))
-    fprintf(stderr, "%s\n", name);
-
+  if (! strcmp("java.lang.Thread.callWithExtentLocalBindings(Ljava/lang/Thread;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;", name)) {
+    // fprintf(stderr, "%s\n", name);
+  }
   if (resolved_method->is_continuation_enter_intrinsic()
       && resolved_method->from_interpreted_entry() == NULL) { // does a load_acquire
     methodHandle mh(THREAD, resolved_method);

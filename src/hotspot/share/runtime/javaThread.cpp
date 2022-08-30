@@ -224,7 +224,6 @@ Method *JavaThread::extentLocalContainer_call_method(JavaThread *current) {
   LinkInfo link_info(ik, vmSymbols::call_method_name(),
                      vmSymbols::extentLocalContainer_call_signature());
   LinkResolver::resolve_static_call(callinfo, link_info, true, current);
-  pfl();
   return callinfo.selected_method();   // resolved_method() ?
 }
 

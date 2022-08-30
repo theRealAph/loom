@@ -26,12 +26,13 @@
 #include "jvm.h"
 #include "classfile/javaClasses.inline.hpp"
 #include "classfile/stringTable.hpp"
+#include "classfile/systemDictionary.hpp"
 #include "classfile/vmClasses.hpp"
 #include "classfile/vmSymbols.hpp"
 #include "code/codeCache.hpp"
 #include "code/compiledIC.hpp"
-#include "code/icBuffer.hpp"
 #include "code/compiledMethod.inline.hpp"
+#include "code/icBuffer.hpp"
 #include "code/scopeDesc.hpp"
 #include "code/vtableStubs.hpp"
 #include "compiler/abstractCompiler.hpp"
@@ -485,8 +486,15 @@ address SharedRuntime::raw_exception_handler_for_return_address(JavaThread* curr
   if (nm != NULL) {
     // Set flag if return address is a method handle call site.
     current->set_is_method_handle_return(nm->is_method_handle_return(return_address));
+    if (nm->method()->is_ExtentLocalBindings_intrinsic()) {
+      asm("nop");
+    }
+
     // native nmethods don't have exception handlers
-    assert(!nm->is_native_method() || nm->method()->is_continuation_enter_intrinsic(), "no exception handler");
+    assert(!nm->is_native_method()
+           || nm->method()->is_continuation_enter_intrinsic()
+           || nm->method()->is_ExtentLocalBindings_intrinsic(),
+           "no exception handler");
     assert(nm->header_begin() != nm->exception_begin(), "no exception handler");
     if (nm->is_deopt_pc(return_address)) {
       // If we come here because of a stack overflow, the stack may be
@@ -1110,6 +1118,30 @@ Handle SharedRuntime::find_callee_info_helper(vframeStream& vfst, Bytecodes::Cod
   if (caller->is_continuation_enter_intrinsic()) {
     bc = Bytecodes::_invokestatic;
     LinkResolver::resolve_continuation_enter(callinfo, CHECK_NH);
+    return receiver;
+  }
+
+  if (caller->is_ExtentLocalBindings_intrinsic()) {
+    bc = Bytecodes::_invokestatic;
+    InstanceKlass* ik = (InstanceKlass::cast
+                         (SystemDictionary::resolve_or_fail
+                          (vmSymbols::extentLocalContainer(), true, current)));
+    switch(caller->intrinsic_id()) {
+      case vmIntrinsicID::_callWithExtentLocalBindings: {
+        LinkInfo link_info(ik, vmSymbols::call_method_name(),
+                           vmSymbols::extentLocalContainer_call_signature());
+        LinkResolver::resolve_static_call(callinfo, link_info, true, current);
+        break;
+      }
+      case vmIntrinsicID::_runWithExtentLocalBindings: {
+        LinkInfo link_info(ik, vmSymbols::run_method_name(),
+                           vmSymbols::extentLocalContainer_run_signature());
+        LinkResolver::resolve_static_call(callinfo, link_info, true, current);
+        break;
+      }
+      default:
+        ShouldNotReachHere();
+    }
     return receiver;
   }
 
@@ -1801,6 +1833,10 @@ methodHandle SharedRuntime::reresolve_call_site(TRAPS) {
   // Do nothing if the frame isn't a live compiled frame.
   // nmethod could be deoptimized by the time we get here
   // so no update to the caller is needed.
+
+  if (caller.is_native_frame()) {
+    asm("nop");
+  }
 
   if (caller.is_compiled_frame() && !caller.is_deoptimized_frame()) {
 
@@ -3111,6 +3147,9 @@ void AdapterHandlerLibrary::create_native_wrapper(const methodHandle& method) {
         DirectiveSet* directive = DirectivesStack::getDefaultDirective(CompileBroker::compiler(CompLevel_simple));
         if (directive->PrintAssemblyOption) {
           nm->print_code();
+        } else {
+          DirectiveSet* directive = DirectivesStack::getMatchingDirective(method, CompileBroker::compiler(CompLevel_simple));
+          nm->maybe_print_nmethod(directive);
         }
         DirectivesStack::release(directive);
       }

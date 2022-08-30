@@ -2046,7 +2046,8 @@ public:
                                       address method_to_invoke,
                                       ByteSize offset_to_entry_point,
                                       bool remove_bindings_entry = false);
-  void invoke_withExtentLocalBindings(address lookup_method, OopMapSet* oop_maps);
+  void invoke_withExtentLocalBindings(address lookup_method, int &exception_offset,
+                                      OopMapSet* oop_maps);
 
   void convert_f2i(Register dst, XMMRegister src);
   void convert_d2i(Register dst, XMMRegister src);

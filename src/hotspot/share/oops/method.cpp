@@ -1325,7 +1325,8 @@ void Method::set_code(const methodHandle& mh, CompiledMethod *code) {
   mh->_from_compiled_entry = code->verified_entry_point();
   OrderAccess::storestore();
 
-  if (mh->is_continuation_enter_intrinsic()) {
+  if (mh->is_continuation_enter_intrinsic() ||
+      mh->is_ExtentLocalBindings_intrinsic()) {
     assert(mh->_from_interpreted_entry == NULL, "initialized incorrectly"); // see link_method
 
     // This is the entry used when we're in interpreter-only mode; see InterpreterMacroAssembler::jump_from_interpreted

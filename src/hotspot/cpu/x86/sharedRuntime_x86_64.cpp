@@ -1512,7 +1512,8 @@ nmethod* SharedRuntime::generate_native_wrapper(MacroAssembler* masm,
       address(iid == vmIntrinsicID::_callWithExtentLocalBindings
               ? JavaThread::extentLocalContainer_call_method
               : JavaThread::extentLocalContainer_run_method);
-    __ invoke_withExtentLocalBindings(lookup_method, oop_maps);
+    __ invoke_withExtentLocalBindings(lookup_method,
+                         exception_offset, oop_maps);
     __ flush();
 
     nmethod* nm = nmethod::new_native_nmethod(method,
