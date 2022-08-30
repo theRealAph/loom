@@ -9291,68 +9291,7 @@ void MacroAssembler::generate_fill_avx3(BasicType type, Register to, Register va
 #endif //COMPILER2_OR_JVMCI
 
 
-
 #ifdef _LP64
-
-void MacroAssembler
-::invoke_withExtentLocalBindings(address *extentLocalContainer_run_method,
-                                 address *extentLocalContainer_call_site,
-                                 address method_to_invoke,
-                                 ByteSize offset_to_entry_point,
-                                 bool remove_bindings_entry) {
-  address entry = pc();
-
-  // j_rarg0: Callable
-  // j_rarg1: java.lang.Thread
-  // j_rarg2: jdk.incubator.concurrent.ExtentLocal$Snapshot
-
-  load_heap_oop(rbx, Address(j_rarg2, java_lang_Thread::extentLocalBindings_offset()), rsi);
-  store_heap_oop(Address(j_rarg2, java_lang_Thread::extentLocalBindings_offset()), j_rarg1, rax, j_rarg3, j_rarg5);
-
-  movptr(j_rarg1, Address(rsp, 0)); // Return address
-  andptr(rsp, -2*wordSize);         // Align
-  movptr(Address(rsp, 0), j_rarg1); // Return address
-
-  Label OK;
-  lea(rax, ExternalAddress((address)extentLocalContainer_run_method));
-  movptr(rax, Address(rax, 0));
-  orptr(rax, rax);
-  jcc(Assembler::notZero, OK);
-  {
-    push_call_clobbered_registers();
-    set_last_Java_frame(r15_thread, noreg, rbp, NULL);
-
-    mov(c_rarg0, r15_thread);
-    call(RuntimeAddress(CAST_FROM_FN_PTR(address, method_to_invoke)));
-    lea(j_rarg1, ExternalAddress((address)extentLocalContainer_run_method));
-    movptr(Address(j_rarg1, 0), rax);
-
-    pop_call_clobbered_registers();
-    reset_last_Java_frame(true);
-
-    lea(rax, ExternalAddress((address)extentLocalContainer_run_method));
-    movptr(rax, Address(rax, 0));
-  }
-  bind(OK);
-
-  subptr(rsp, 4*wordSize);               // Keep stack 16-aligned
-  movptr(Address(rsp, 0*wordSize), j_rarg0); // The lambda to call
-  movptr(Address(rsp, 1*wordSize), rbx); // prev j.i.c.ExtentLocal$Snapshot
-  subptr(r13, rsp);
-  movptr(Address(rsp, 2*wordSize), r13); // offset to sender sp
-
-  // Call interpreter entry with our outgoing arg
-  mov(r13, rsp);
-  mov(rbx, rax); // Method*
-  movptr(rax, Address(rbx, offset_to_entry_point));
-  call(rax);
-
-  *extentLocalContainer_call_site = pc();
-
-  // rax/xmm0 is live with the result of the call
-  remove_ExtentLocalBindings(0, /*new sp*/r13, /*temps*/j_rarg2, rbx, j_rarg1, j_rarg3, j_rarg5);
-
-}
 
 void barf() { asm("nop"); }
 

@@ -322,8 +322,16 @@ class AbstractAssembler : public ResourceObj  {
 
   static bool is_uimm12(uint64_t x) { return is_uimm(x, 12); }
 
+  static address FUBAR;
+
   // Accessors
-  CodeSection*  code_section() const   { return _code_section; }
+  CodeSection*  code_section() const   {
+    if (_code_section->end() == FUBAR) {
+      asm("nop");
+    }
+    return _code_section;
+  }
+
   CodeBuffer*   code()         const   { return code_section()->outer(); }
   int           sect()         const   { return code_section()->index(); }
   address       pc()           const   { return code_section()->end();   }

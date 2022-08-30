@@ -34,6 +34,8 @@
 #include "runtime/os.hpp"
 
 
+address AbstractAssembler::FUBAR = (address)0x00007fffe7b5e24f;
+
 // Implementation of AbstractAssembler
 //
 // The AbstractAssembler is generating code into a CodeBuffer. To make code generation faster,

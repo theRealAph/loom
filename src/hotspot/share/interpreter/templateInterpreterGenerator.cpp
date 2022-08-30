@@ -225,8 +225,6 @@ void TemplateInterpreterGenerator::generate_all() {
   method_entry(java_lang_Double_longBitsToDouble);
   method_entry(java_lang_Double_doubleToRawLongBits);
 
-  method_entry(java_lang_thread_runWithExtentLocalBindings)
-  method_entry(java_lang_thread_callWithExtentLocalBindings)
   method_entry(java_lang_continuation_doYield)
 
 #undef method_entry
@@ -459,12 +457,6 @@ address TemplateInterpreterGenerator::generate_method_entry(
                                            : native = true; entry_point = generate_Double_doubleToRawLongBits_entry(); break;
 #else
 
-  case Interpreter::java_lang_thread_callWithExtentLocalBindings:
-    entry_point = generate_java_lang_thread_callWithExtentLocalBindings();
-    break;
-  case Interpreter::java_lang_thread_runWithExtentLocalBindings:
-    entry_point = generate_java_lang_thread_runWithExtentLocalBindings();
-    break;
   case Interpreter::java_lang_Float_intBitsToFloat:
   case Interpreter::java_lang_Float_floatToRawIntBits:
   case Interpreter::java_lang_Double_longBitsToDouble:

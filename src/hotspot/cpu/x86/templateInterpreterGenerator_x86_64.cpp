@@ -461,22 +461,3 @@ address TemplateInterpreterGenerator::generate_currentThread() {
   return entry_point;
 }
 
-address extentLocalContainer_run_site;
-static address extentLocalContainer_run_method;
-
-address  TemplateInterpreterGenerator::generate_java_lang_thread_runWithExtentLocalBindings() {
-  return __ invoke_withExtentLocalBindings(&extentLocalContainer_run_method,
-                                           &extentLocalContainer_run_site,
-                                           CAST_TO_FN_PTR(address, &JavaThread::extentLocalContainer_run_method));
-}
-
-address extentLocalContainer_call_site;
-static address extentLocalContainer_call_method;
-
-address  TemplateInterpreterGenerator::generate_java_lang_thread_callWithExtentLocalBindings() {
-  return __ invoke_withExtentLocalBindings(&extentLocalContainer_call_method,
-                                           &extentLocalContainer_call_site,
-                                           CAST_TO_FN_PTR(address, &JavaThread::extentLocalContainer_call_method));
-}
-
-
