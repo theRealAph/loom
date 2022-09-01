@@ -9327,11 +9327,11 @@ void MacroAssembler
   map->set_oop(VMRegImpl::stack2reg(2)); // prev j.i.c.ExtentLocal$Snapshot
   map->set_oop(VMRegImpl::stack2reg(4)); // java.lang.Thread
 
-  Label NAK, NAK_RET;
-  bind(NAK_RET);
+  Label RESOLVE, RESOLVE_RET;
+  bind(RESOLVE_RET);
   movptr(rbx, InternalAddress(target(RUN_METHOD)));
   orptr(rbx, rbx);
-  jcc(Assembler::zero, NAK);
+  jcc(Assembler::zero, RESOLVE);
 
   // Call compiled entry with our outgoing arg
   // mov(r13, rsp);
@@ -9350,7 +9350,9 @@ void MacroAssembler
   // mov(rsp, r13);
   jmp(j_rarg2);
 
-  bind(NAK);
+  // Resolve static call to
+  // jdk/internal/vm/ExtentLocalContainer.{call|run}WithExtentLocalBindings
+  bind(RESOLVE);
   address the_pc = pc();
   oop_maps->add_gc_map(offset(), map->deep_copy());
   set_last_Java_frame(r15_thread, noreg, rbp, the_pc);
@@ -9365,7 +9367,7 @@ void MacroAssembler
   pop_call_clobbered_registers();
   reset_last_Java_frame(true);
 
-  jmp(NAK_RET);
+  jmp(RESOLVE_RET);
 
   // Exception entry
   exception_offset = pc() - entry;
@@ -9376,6 +9378,7 @@ void MacroAssembler
 
   remove_ExtentLocalBindings(0, rax,
                              j_rarg1, j_rarg2, j_rarg3, j_rarg4, j_rarg5);
+
   BLOCK_COMMENT("clear extentLocalCache {");
   xorptr(rbx, rbx);
   movptr(c_rarg0, Address(r15_thread, JavaThread::extentLocalCache_offset()));

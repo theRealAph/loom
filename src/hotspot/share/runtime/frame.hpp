@@ -190,6 +190,7 @@ class frame {
   bool is_deoptimized_frame()    const;
   bool is_upcall_stub_frame()    const;
   bool is_heap_frame()             const { return _on_heap; }
+  bool is_ExtentLocalBindings_intrinsic() const;
 
   // testers
   bool is_first_frame() const; // oldest frame? (has no sender)

@@ -1355,7 +1355,10 @@ static bool interpreted_native_or_deoptimized_on_stack(JavaThread* thread) {
   map.set_include_argument_oops(false);
   for (frame f = thread->last_frame(); Continuation::is_frame_in_continuation(ce, f); f = f.sender(&map)) {
     if (f.is_interpreted_frame() || f.is_native_frame() || f.is_deoptimized_frame()) {
-      return true;
+      if (!f.is_ExtentLocalBindings_intrinsic()) {
+        log_develop_trace(continuations)("Found interp frame at %p", f.sp());
+        return true;
+      }
     }
   }
   return false;
