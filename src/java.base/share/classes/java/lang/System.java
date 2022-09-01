@@ -2588,6 +2588,16 @@ public final class System {
                 Thread.setExtentLocalBindings(bindings);
             }
 
+            public void runWithExtentLocalBindings(Thread thread, Object aCarrier,
+                                                  Object aRunnable) {
+                Thread.runWithExtentLocalBindings(thread, aCarrier, aRunnable);
+            }
+
+            public Object callWithExtentLocalBindings(Thread thread, Object aCarrier,
+                                                        Object aCallable) {
+                return Thread.callWithExtentLocalBindings(thread, aCarrier, aCallable);
+            }
+
             public Continuation getContinuation(Thread thread) {
                 return thread.getContinuation();
             }

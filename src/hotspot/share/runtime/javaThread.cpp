@@ -195,6 +195,82 @@ void JavaThread::set_extentLocalCache(oop p) {
   _extentLocalCache.replace(p);
 }
 
+Method *JavaThread::extentLocalContainer_run_method(JavaThread *current) {
+  // assert(current == JavaThread::current(), "Must be");
+  MACOS_AARCH64_ONLY(ThreadWXEnable __wx(WXWrite, current));
+  ThreadInVMfromJava __tiv(current);
+  VM_ENTRY_BASE(Method *, , current);
+  debug_only(VMEntryWrapper __vew;)
+  InstanceKlass* ik = InstanceKlass::cast(SystemDictionary::resolve_or_fail(vmSymbols::extentLocalContainer(), true, current));
+  CallInfo callinfo;
+  LinkInfo link_info(ik, vmSymbols::run_method_name(),
+                     vmSymbols::extentLocalContainer_run_signature());
+  LinkResolver::resolve_static_call(callinfo, link_info, true, current);
+  return callinfo.selected_method();   // resolved_method() ?
+}
+
+extern "C" JNIEXPORT void pfl();
+
+Method *JavaThread::extentLocalContainer_call_method(JavaThread *current) {
+  // assert(current == JavaThread::current(), "Must be");
+  MACOS_AARCH64_ONLY(ThreadWXEnable __wx(WXWrite, current));
+  ThreadInVMfromJava __tiv(current);
+  VM_ENTRY_BASE(Method *, , current);
+  debug_only(VMEntryWrapper __vew;)
+  InstanceKlass* ik = InstanceKlass::cast(SystemDictionary::resolve_or_fail(vmSymbols::extentLocalContainer(), true, current));
+  CallInfo callinfo;
+  LinkInfo link_info(ik, vmSymbols::call_method_name(),
+                     vmSymbols::extentLocalContainer_call_signature());
+  LinkResolver::resolve_static_call(callinfo, link_info, true, current);
+  return callinfo.selected_method();   // resolved_method() ?
+}
+
+void JavaThread::runWithExtentLocalBindings(jobject java_thread, jobject bindings, jobject runnable, TRAPS) {
+  abort();
+  JavaValue result(T_VOID);
+  InstanceKlass* ik = InstanceKlass::cast(SystemDictionary::resolve_or_fail(vmSymbols::extentLocalContainer(), true, this));
+  // Do we need this?
+  // assert(ik->is_initialized(), "must be");
+  oop the_bindings = JNIHandles::resolve_non_null(bindings);
+  oop the_runnable = JNIHandles::resolve_non_null(runnable);
+  oop thread_oop = JNIHandles::resolve_non_null(java_thread);
+
+  Handle jthread(THREAD, thread_oop);
+  Handle prev_bindings(THREAD, java_lang_Thread::extentLocalBindings(jthread()));
+  java_lang_Thread::set_extentLocalBindings(jthread(), the_bindings);
+
+  JavaCalls::call_static(&result,
+                         ik,
+                         vmSymbols::run_method_name(),
+                         vmSymbols::extentLocalContainer_run_signature(),
+                         Handle(THREAD, the_runnable),
+                         THREAD);
+  java_lang_Thread::set_extentLocalBindings(jthread(), prev_bindings());
+}
+
+oop JavaThread::callWithExtentLocalBindings(jobject java_thread, jobject bindings, jobject callable, TRAPS) {
+  abort();
+  JavaValue result(T_OBJECT);
+  InstanceKlass* ik = InstanceKlass::cast(SystemDictionary::resolve_or_fail(vmSymbols::extentLocalContainer(), true, this));
+  // Do we need this?
+  // assert(ik->is_initialized(), "must be");
+  oop the_bindings = JNIHandles::resolve_non_null(bindings);
+  oop the_callable = JNIHandles::resolve_non_null(callable);
+  oop thread_oop = JNIHandles::resolve_non_null(java_thread);
+
+  Handle jthread(THREAD, thread_oop);
+  Handle prev_bindings(THREAD, java_lang_Thread::extentLocalBindings(jthread()));
+  java_lang_Thread::set_extentLocalBindings(jthread(), the_bindings);
+  JavaCalls::call_static(&result,
+                         ik,
+                         vmSymbols::call_method_name(),
+                         vmSymbols::extentLocalContainer_call_signature(),
+                         Handle(THREAD, the_callable),
+                         THREAD);
+  java_lang_Thread::set_extentLocalBindings(jthread(), prev_bindings());
+  return result.get_oop();
+}
+
 void JavaThread::allocate_threadObj(Handle thread_group, const char* thread_name,
                                     bool daemon, TRAPS) {
   assert(thread_group.not_null(), "thread group should be specified");
@@ -1521,7 +1597,7 @@ void JavaThread::print_on(outputStream *st, bool print_extended_info) const {
   }
 }
 
-void JavaThread::print() const { print_on(tty); }
+void JavaThread::print() const { ResourceMark rm; print_on(tty); }
 
 void JavaThread::print_name_on_error(outputStream* st, char *buf, int buflen) const {
   st->print("%s", get_thread_name_string(buf, buflen));

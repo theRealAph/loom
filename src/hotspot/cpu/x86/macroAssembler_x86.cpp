@@ -8182,7 +8182,6 @@ void MacroAssembler::crc32c_ipl_alg2_alt2(Register in_out, Register in1, Registe
 }
 #endif // LP64
 #undef BIND
-#undef BLOCK_COMMENT
 
 // Compress char[] array to byte[].
 //   ..\jdk\src\java.base\share\classes\java\lang\StringUTF16.java
@@ -9214,6 +9213,130 @@ void MacroAssembler::generate_fill_avx3(BasicType type, Register to, Register va
 
 
 #ifdef _LP64
+
+void barf() { asm("nop"); }
+
+void MacroAssembler
+::invoke_withExtentLocalBindings(address lookup_method, int &exception_offset, OopMapSet* oop_maps) {
+  address entry = pc();
+
+  Label around, RUN_METHOD;
+  {
+    jmp(around);
+    align(3);
+    bind(RUN_METHOD);
+    emit_int64(0);
+    bind(around);
+  }
+
+  // j_rarg0: java.lang.Thread
+  // j_rarg1: jdk.incubator.concurrent.ExtentLocal$Snapshot
+  // j_rarg2: Callable
+
+  subptr(rsp, 5*wordSize);               // Keep stack 16-aligned
+  movptr(Address(rsp, 4*wordSize), rbp); // Everything saves ebp
+  movptr(Address(rsp, 2*wordSize), j_rarg0); // j_rarg0: java.lang.Thread
+  movptr(Address(rsp, 0*wordSize), j_rarg2); // The lambda to call
+
+  load_heap_oop(rbx, Address(j_rarg0, java_lang_Thread::extentLocalBindings_offset()), rsi);
+  movptr(Address(rsp, 1*wordSize), rbx); // prev j.i.c.ExtentLocal$Snapshot
+
+  store_heap_oop(Address(j_rarg0, java_lang_Thread::extentLocalBindings_offset()), j_rarg1, rax, j_rarg3, j_rarg5);
+
+  OopMap* map = new OopMap(/* frame_size_in_slots */12, 0);
+  map->set_oop(VMRegImpl::stack2reg(0)); // The lambda to call
+  map->set_oop(VMRegImpl::stack2reg(2)); // prev j.i.c.ExtentLocal$Snapshot
+  map->set_oop(VMRegImpl::stack2reg(4)); // java.lang.Thread
+
+  Label RESOLVE, RESOLVE_RET;
+  bind(RESOLVE_RET);
+  movptr(rbx, InternalAddress(target(RUN_METHOD)));
+  orptr(rbx, rbx);
+  jcc(Assembler::zero, RESOLVE);
+
+  // Call compiled entry with our outgoing arg
+  // mov(r13, rsp);
+  movptr(rax, Address(rbx, Method::from_compiled_offset()));
+  movptr(j_rarg0, Address(rsp, 0*wordSize)); // The lambda to call
+
+  call(rax);
+  oop_maps->add_gc_map(offset(), map->deep_copy());
+
+  // rax/xmm0 is live with the result of the call
+  remove_ExtentLocalBindings(0, /*new sp*/r13, /*temps*/j_rarg2, rbx, j_rarg1, j_rarg3, j_rarg5);
+
+  movptr(rbp, Address(rsp, 4*wordSize));
+  movptr(j_rarg2, Address(rsp, 5*wordSize));  // Saved return address
+  addptr(rsp, 6*wordSize);
+  // mov(rsp, r13);
+  jmp(j_rarg2);
+
+  // Resolve static call to
+  // jdk/internal/vm/ExtentLocalContainer.{call|run}WithExtentLocalBindings
+  bind(RESOLVE);
+  address the_pc = pc();
+  oop_maps->add_gc_map(offset(), map->deep_copy());
+  set_last_Java_frame(r15_thread, noreg, rbp, the_pc);
+  push_call_clobbered_registers();
+
+  mov(c_rarg0, r15_thread);
+  call(RuntimeAddress(lookup_method));
+
+  lea(j_rarg1, InternalAddress(target(RUN_METHOD)));
+  movptr(Address(j_rarg1, 0), rax);
+
+  pop_call_clobbered_registers();
+  reset_last_Java_frame(true);
+
+  jmp(RESOLVE_RET);
+
+  // Exception entry
+  exception_offset = pc() - entry;
+  oop_maps->add_gc_map(offset(), map);
+  set_last_Java_frame(r15_thread, noreg, rbp, pc());
+  call(RuntimeAddress((address)barf));
+  reset_last_Java_frame(true);
+
+  remove_ExtentLocalBindings(0, rax,
+                             j_rarg1, j_rarg2, j_rarg3, j_rarg4, j_rarg5);
+
+  BLOCK_COMMENT("clear extentLocalCache {");
+  xorptr(rbx, rbx);
+  movptr(c_rarg0, Address(r15_thread, JavaThread::extentLocalCache_offset()));
+  access_store_at(T_OBJECT, IN_NATIVE, Address(c_rarg0, 0), rbx, c_rarg1, c_rarg2, c_rarg3);
+  BLOCK_COMMENT("} clear extentLocalCache");
+
+  movptr(c_rarg0, r15_thread);
+  movptr(rbp, Address(rsp, 4*wordSize));      // Restore frame pointer
+  movptr(c_rarg1, Address(rsp, 5*wordSize));  // Saved return address
+
+  // rax still holds the original exception oop, save it before the call
+  push(rax);
+
+  call_VM_leaf(CAST_FROM_FN_PTR(address, SharedRuntime::exception_handler_for_return_address), 2);
+  movptr(rbx, rax);
+
+  // Continue at exception handler:
+  //   rax: exception oop
+  //   rbx: exception handler
+  //   rdx: exception pc
+  pop(rax);
+  verify_oop(rax);
+  movptr(rdx, Address(rsp, 5*wordSize));
+  jmp(rbx);
+}
+
+void MacroAssembler::remove_ExtentLocalBindings(size_t stack_offset,
+     Register result,
+     Register tmp1, Register tmp2, Register tmp3, Register tmp4, Register tmp5) {
+  BLOCK_COMMENT("remove_ExtentLocalBindings {");
+  movptr(tmp2, Address(rsp, 1*wordSize + stack_offset)); // prev j.i.c.ExtentLocal$Snapshot
+  movptr(tmp1, Address(rsp, 2*wordSize)); // java.lang.Thread
+  store_heap_oop(Address(tmp1, java_lang_Thread::extentLocalBindings_offset()),
+                 tmp2, tmp3, tmp4, tmp5);
+  BLOCK_COMMENT("} remove_ExtentLocalBindings");
+}
+
 void MacroAssembler::convert_f2i(Register dst, XMMRegister src) {
   Label done;
   cvttss2sil(dst, src);

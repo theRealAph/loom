@@ -1798,6 +1798,14 @@ void java_lang_Thread::clear_extentLocalBindings(oop java_thread) {
   java_thread->obj_field_put(_extentLocalBindings_offset, NULL);
 }
 
+oop java_lang_Thread::extentLocalBindings(oop java_thread) {
+  return java_thread->obj_field(_extentLocalBindings_offset);
+}
+
+void java_lang_Thread::set_extentLocalBindings(oop java_thread, oop bindings) {
+  return java_thread->obj_field_put(_extentLocalBindings_offset, bindings);
+}
+
 oop java_lang_Thread::holder(oop java_thread) {
     return java_thread->obj_field(_holder_offset);
 }

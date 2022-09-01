@@ -1238,7 +1238,8 @@ void Method::link_method(const methodHandle& h_method, TRAPS) {
 
   // ONLY USE the h_method now as make_adapter may have blocked
 
-  if (h_method->is_continuation_enter_intrinsic()) {
+  if (h_method->is_continuation_enter_intrinsic()
+      || h_method->is_ExtentLocalBindings_intrinsic()) {
     // the entry points to this method will be set in set_code, called when first resolving this method
     _from_interpreted_entry = NULL;
     _from_compiled_entry = NULL;

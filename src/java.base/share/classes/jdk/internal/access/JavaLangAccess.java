@@ -494,6 +494,11 @@ public interface JavaLangAccess {
      */
     void setExtentLocalBindings(Object bindings);
 
+    void runWithExtentLocalBindings(Thread thread, Object aCarrier,
+                                   Object aRunnable);
+    Object callWithExtentLocalBindings(Thread thread, Object aCarrier,
+                                     Object aCallable);
+
     /**
      * Returns the innermost mounted continuation
      */

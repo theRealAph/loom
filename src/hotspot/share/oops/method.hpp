@@ -738,6 +738,9 @@ public:
   inline bool is_continuation_enter_intrinsic() const;
   inline bool is_special_native_intrinsic() const;
 
+  // ExtentLocal support
+  inline bool is_ExtentLocalBindings_intrinsic() const;
+
   static Klass* check_non_bcp_klass(Klass* klass);
 
   enum {

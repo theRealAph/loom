@@ -1557,6 +1557,35 @@ nmethod* SharedRuntime::generate_native_wrapper(MacroAssembler* masm,
     return nm;
   }
 
+  if (method->is_ExtentLocalBindings_intrinsic()) {
+    vmIntrinsics::ID iid = method->intrinsic_id();
+    intptr_t start = (intptr_t)__ pc();
+    int vep_offset = ((intptr_t)__ pc()) - start;
+    int exception_offset = 0;
+    int frame_complete = 0;
+    int stack_slots = 0;
+    OopMapSet* oop_maps =  new OopMapSet();
+    address lookup_method =
+      address(iid == vmIntrinsicID::_callWithExtentLocalBindings
+              ? JavaThread::extentLocalContainer_call_method
+              : JavaThread::extentLocalContainer_run_method);
+    __ invoke_withExtentLocalBindings(lookup_method,
+                         exception_offset, oop_maps);
+    __ flush();
+
+    nmethod* nm = nmethod::new_native_nmethod(method,
+                                              compile_id,
+                                              masm->code(),
+                                              vep_offset,
+                                              frame_complete,
+                                              /* stack_slots */6,
+                                              in_ByteSize(-1),
+                                              in_ByteSize(-1),
+                                              oop_maps,
+                                              exception_offset);
+    return nm;
+  }
+
   if (method->is_method_handle_intrinsic()) {
     vmIntrinsics::ID iid = method->intrinsic_id();
     intptr_t start = (intptr_t)__ pc();

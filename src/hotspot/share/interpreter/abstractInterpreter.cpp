@@ -155,6 +155,10 @@ AbstractInterpreter::MethodKind AbstractInterpreter::method_kind(const methodHan
           return java_lang_continuation_doYield;
         }
         break;
+      case vmIntrinsics::_runWithExtentLocalBindings:
+        return zerolocals;
+      case vmIntrinsics::_callWithExtentLocalBindings:
+        return zerolocals;
       case vmIntrinsics::_Object_init:
         if (RegisterFinalizersAtInit && m->code_size() == 1) {
           // We need to execute the special return bytecode to check for

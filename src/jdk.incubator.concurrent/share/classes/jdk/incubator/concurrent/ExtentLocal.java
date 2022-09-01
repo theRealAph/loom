@@ -323,17 +323,15 @@ public final class ExtentLocal<T> {
          * @return the result
          * @throws Exception if {@code op} completes with an exception
          */
+        @SuppressWarnings("unchecked")
         public <R> R call(Callable<R> op) throws Exception {
             Objects.requireNonNull(op);
             Cache.invalidate(bitmask);
-            var prevBindings = addExtentLocalBindings(this);
+            var prevBindings =  extentLocalBindings();
+            var snapshot = new Snapshot(this, prevBindings);
             try {
-                return ExtentLocalContainer.call(op);
-            } catch (Throwable t) {
-                setExtentLocalCache(null); // Cache.invalidate();
-                throw t;
+                return (R)JLA.callWithExtentLocalBindings(Thread.currentThread(), snapshot, op);
             } finally {
-                setExtentLocalBindings(prevBindings);
                 Cache.invalidate(bitmask);
             }
         }
@@ -355,14 +353,13 @@ public final class ExtentLocal<T> {
         public void run(Runnable op) {
             Objects.requireNonNull(op);
             Cache.invalidate(bitmask);
-            var prevBindings = addExtentLocalBindings(this);
+            var prevBindings = extentLocalBindings();
+            var snapshot = new Snapshot(this, prevBindings);
+            // ExtentLocal.setExtentLocalBindings(b);
             try {
-                ExtentLocalContainer.run(op);
-            } catch (Throwable t) {
-                setExtentLocalCache(null); // Cache.invalidate();
-                throw t;
+                JLA.runWithExtentLocalBindings(Thread.currentThread(), snapshot, op);
+                // ExtentLocalContainer.run(op);
             } finally {
-                setExtentLocalBindings(prevBindings);
                 Cache.invalidate(bitmask);
             }
         }
@@ -536,6 +533,16 @@ public final class ExtentLocal<T> {
         JLA.setExtentLocalCache(cache);
     }
 
+    private static void runWithExtentLocalBindings(Thread thread, Snapshot aSnapshot,
+                                                   Runnable aRunnable) {
+        JLA.runWithExtentLocalBindings(thread, aSnapshot, aRunnable);
+    }
+
+    private static Object callWithExtentLocalBindings(Thread thread, Snapshot aSnapshot,
+                                                      Callable<?> aCallable) {
+        return JLA.callWithExtentLocalBindings(thread, aSnapshot, aCallable);
+    }
+
     private static Snapshot extentLocalBindings() {
         Object bindings = JLA.extentLocalBindings();
         if (bindings != null) {
@@ -663,6 +670,11 @@ public final class ExtentLocal<T> {
             cache[n * 2 + 1] = value;
         }
 
+        private static void setKeyAndObjectAt(Object[] cache, int n, Object key, Object value) {
+            cache[n * 2] = key;
+            cache[n * 2 + 1] = value;
+        }
+
         private static Object getKey(Object[] objs, int n) {
             return objs[n * 2];
         }
@@ -696,7 +708,7 @@ public final class ExtentLocal<T> {
             if ((objects = extentLocalCache()) != null) {
                 for (int bits = toClearBits; bits != 0; ) {
                     int index = Integer.numberOfTrailingZeros(bits);
-                    setKeyAndObjectAt(index & SLOT_MASK, null, null);
+                    setKeyAndObjectAt(objects, index & SLOT_MASK, null, null);
                     bits &= ~1 << index;
                 }
             }

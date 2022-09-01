@@ -2049,6 +2049,12 @@ public:
   void fill64(Register dst, int dis, XMMRegister xmm, bool use64byteVector = false);
 
 #ifdef _LP64
+  void remove_ExtentLocalBindings(size_t stack_offset,
+     Register result,
+     Register tmp1, Register tmp2, Register tmp3, Register tmp4, Register tmp5);
+  void invoke_withExtentLocalBindings(address lookup_method, int &exception_offset,
+                                      OopMapSet* oop_maps);
+
   void convert_f2i(Register dst, XMMRegister src);
   void convert_d2i(Register dst, XMMRegister src);
   void convert_f2l(Register dst, XMMRegister src);

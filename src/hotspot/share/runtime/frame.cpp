@@ -257,6 +257,13 @@ bool frame::is_native_frame() const {
           ((nmethod*)_cb)->is_native_method());
 }
 
+bool frame::is_ExtentLocalBindings_intrinsic() const {
+  if (_cb == NULL)  return false;
+  if (!_cb->is_nmethod())  return false;
+  nmethod* nm = (nmethod*)_cb;
+  return nm->method()->is_ExtentLocalBindings_intrinsic();
+}
+
 bool frame::is_java_frame() const {
   if (is_interpreted_frame()) return true;
   if (is_compiled_frame())    return true;

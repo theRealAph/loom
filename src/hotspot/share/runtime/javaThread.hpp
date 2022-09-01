@@ -521,6 +521,11 @@ private:
   void set_vthread(oop p);
   oop extentLocalCache() const;
   void set_extentLocalCache(oop p);
+  static Method *extentLocalContainer_run_method(JavaThread *self);
+  static Method *extentLocalContainer_call_method(JavaThread *self);
+  void runWithExtentLocalBindings(jobject java_thread, jobject bindings, jobject runnable, TRAPS);
+  oop callWithExtentLocalBindings(jobject java_thread, jobject bindings, jobject callable, TRAPS);
+
   oop jvmti_vthread() const;
   void set_jvmti_vthread(oop p);
 

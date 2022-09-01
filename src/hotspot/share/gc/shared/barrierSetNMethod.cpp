@@ -49,7 +49,8 @@ bool BarrierSetNMethod::supports_entry_barrier(nmethod* nm) {
     return false;
   }
 
-  if (nm->method()->is_continuation_enter_intrinsic()) {
+  if (nm->method()->is_continuation_enter_intrinsic() ||
+      nm->method()->is_ExtentLocalBindings_intrinsic()) {
     return false;
   }
 

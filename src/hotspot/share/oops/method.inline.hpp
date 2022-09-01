@@ -93,8 +93,16 @@ inline bool Method::is_empty_method() const {
 inline bool Method::is_continuation_enter_intrinsic() const {
   return intrinsic_id() == vmIntrinsics::_Continuation_enterSpecial;
 }
+
 inline bool Method::is_special_native_intrinsic() const {
-  return is_method_handle_intrinsic() || is_continuation_enter_intrinsic();
+  return is_method_handle_intrinsic()
+    || is_continuation_enter_intrinsic()
+    || is_ExtentLocalBindings_intrinsic();
+}
+
+inline bool Method::is_ExtentLocalBindings_intrinsic() const {
+  return (intrinsic_id() == vmIntrinsics::_callWithExtentLocalBindings ||
+          intrinsic_id() == vmIntrinsics::_runWithExtentLocalBindings);
 }
 
 #endif // SHARE_OOPS_METHOD_INLINE_HPP
