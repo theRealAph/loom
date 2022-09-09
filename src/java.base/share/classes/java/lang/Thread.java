@@ -275,10 +275,14 @@ public class Thread implements Runnable {
      */
     ThreadLocal.ThreadLocalMap inheritableThreadLocals;
 
+    private static final Object noExtentLocalBindings = new Object();
+
     /*
      * Extent locals binding are maintained by the ExtentLocal class.
      */
-    private Object extentLocalBindings;
+    private Object extentLocalBindings = noExtentLocalBindings;
+
+    static Object noExtentLocalBindings() { return Thread.noExtentLocalBindings; }
 
     static Object extentLocalBindings() {
         return currentThread().extentLocalBindings;
@@ -289,17 +293,10 @@ public class Thread implements Runnable {
     }
 
     /**
-     * Returns the {@code AccessControlContext}. i.e., it gets
-     * the protection domains of all the callers on the stack,
-     * starting at the first class with a non-null
-     * {@code ProtectionDomain}.
-     *
-     * @return the access control context based on the current stack or
-     *         {@code null} if there was only privileged system code.
+     * Search the stack for the most recent extent-local bindings.
      */
-
     @IntrinsicCandidate
-    public static native Object findExtentLocalBindings();
+    static native Object findExtentLocalBindings();
 
     /**
      * Inherit the extent-local bindings from the given container.

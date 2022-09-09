@@ -28,6 +28,7 @@ package jdk.incubator.concurrent;
 
 import java.util.NoSuchElementException;
 import java.util.Objects;
+import java.lang.ref.Reference;
 import java.util.concurrent.Callable;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -158,6 +159,9 @@ public final class ExtentLocal<T> {
     private static final JavaLangAccess JLA = SharedSecrets.getJavaLangAccess();
 
     private final @Stable int hash;
+
+    private static final Object NO_EXTENT_LOCAL_BINDINGS
+        = JLA.noExtentLocalBindings();
 
     @Override
     public int hashCode() { return hash; }
@@ -326,16 +330,22 @@ public final class ExtentLocal<T> {
         public <R> R call(Callable<R> op) throws Exception {
             Objects.requireNonNull(op);
             Cache.invalidate(bitmask);
-            var prevBindings = addExtentLocalBindings(this);
+            var prevSnapshot = extentLocalBindings();
+            var newSnapshot = new Snapshot(this, prevSnapshot);
+            R result;
             try {
-                return ExtentLocalContainer.call(op);
+                setExtentLocalBindings(newSnapshot);
+                result = ExtentLocalContainer.call(op);
             } catch (Throwable t) {
                 setExtentLocalCache(null); // Cache.invalidate();
+                Reference.reachabilityFence(newSnapshot);
                 throw t;
             } finally {
-                setExtentLocalBindings(prevBindings);
+                setExtentLocalBindings(prevSnapshot);
                 Cache.invalidate(bitmask);
             }
+            Reference.reachabilityFence(newSnapshot);
+            return result;
         }
 
         /**
@@ -355,16 +365,19 @@ public final class ExtentLocal<T> {
         public void run(Runnable op) {
             Objects.requireNonNull(op);
             Cache.invalidate(bitmask);
-            var prevBindings = addExtentLocalBindings(this);
+            var prevSnapshot = extentLocalBindings();
+            var newSnapshot = new Snapshot(this, prevSnapshot);
             try {
+                setExtentLocalBindings(newSnapshot);
                 ExtentLocalContainer.run(op);
             } catch (Throwable t) {
                 setExtentLocalCache(null); // Cache.invalidate();
                 throw t;
             } finally {
-                setExtentLocalBindings(prevBindings);
+                setExtentLocalBindings(prevSnapshot);
                 Cache.invalidate(bitmask);
             }
+            Reference.reachabilityFence(newSnapshot);
         }
 
         /*
@@ -548,11 +561,16 @@ public final class ExtentLocal<T> {
 
     private static Snapshot extentLocalBindings() {
         Object bindings = JLA.extentLocalBindings();
-        if (bindings != null) {
-            return (Snapshot) bindings;
-        } else {
-            return EmptySnapshot.getInstance();
+        if (bindings == null) {
+            bindings = JLA.findExtentLocalBindings();  // Search the stack
+            if (bindings == null) {
+                bindings = EmptySnapshot.getInstance();
+                JLA.setExtentLocalBindings(bindings);
+            }
+        } else if (bindings == NO_EXTENT_LOCAL_BINDINGS) {
+            bindings = EmptySnapshot.getInstance();
         }
+        return (Snapshot) bindings;
     }
 
     private static void setExtentLocalBindings(Snapshot bindings) {

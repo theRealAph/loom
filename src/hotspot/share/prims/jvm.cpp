@@ -1386,7 +1386,7 @@ JVM_ENTRY(jobject, JVM_FindExtentLocalBindings(JNIEnv *env, jclass cls))
       javaVFrame *frame = vfst.asJavaVFrame();       // executePrivileged
       StackValueCollection* locals = frame->locals();
       StackValue* prev_sv = locals->at(2);
-      StackValue* head_sv = locals->at(0);
+      StackValue* head_sv = locals->at(3); // jdk/incubator/concurrent/ExtentLocal$Snapshot
       assert(!prev_sv->obj_is_scalar_replaced(), "found scalar-replaced object");
       assert(!head_sv->obj_is_scalar_replaced(), "found scalar-replaced object");
       Handle result = head_sv->get_obj();

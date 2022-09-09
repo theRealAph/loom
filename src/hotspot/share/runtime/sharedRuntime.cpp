@@ -813,6 +813,9 @@ void SharedRuntime::throw_StackOverflowError_common(JavaThread* current, bool de
   // Remove the ExtentLocal cache in case we got a StackOverflowError
   // while we were trying to remove ExtentLocal bindings.
   current->set_extentLocalCache(NULL);
+  // And the ExtentLocal bindings too.
+  oop threadObj = current->threadObj();
+  java_lang_Thread::set_extentLocalBindings(threadObj, NULL);
   // Increment counter for hs_err file reporting
   Atomic::inc(&Exceptions::_stack_overflow_errors);
   throw_and_post_jvmti_exception(current, exception);
