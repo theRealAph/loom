@@ -293,6 +293,9 @@ class methodHandle;
    do_signature( callWithExtentLocalBindings_signature, "(Ljava/lang/Thread;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;") \
    do_name(     callWithExtentLocalBindings_name,                            "callWithExtentLocalBindings") \
                                                                         \
+  do_intrinsic(_findExtentLocalBindings,       java_lang_Thread,       findExtentLocalBindings_name, void_object_signature, F_SN) \
+   do_name(     findExtentLocalBindings_name,                          "findExtentLocalBindings") \
+                                                                        \
                                                                         \
   do_class(extentLocalContainer,                  "jdk/internal/vm/ExtentLocalContainer") \
    do_signature(extentLocalContainer_run_signature,              "(Ljava/lang/Runnable;)V") \

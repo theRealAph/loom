@@ -323,15 +323,17 @@ public final class ExtentLocal<T> {
          * @return the result
          * @throws Exception if {@code op} completes with an exception
          */
-        @SuppressWarnings("unchecked")
         public <R> R call(Callable<R> op) throws Exception {
             Objects.requireNonNull(op);
             Cache.invalidate(bitmask);
-            var prevBindings =  extentLocalBindings();
-            var snapshot = new Snapshot(this, prevBindings);
+            var prevBindings = addExtentLocalBindings(this);
             try {
-                return (R)JLA.callWithExtentLocalBindings(Thread.currentThread(), snapshot, op);
+                return ExtentLocalContainer.call(op);
+            } catch (Throwable t) {
+                setExtentLocalCache(null); // Cache.invalidate();
+                throw t;
             } finally {
+                setExtentLocalBindings(prevBindings);
                 Cache.invalidate(bitmask);
             }
         }
@@ -353,13 +355,14 @@ public final class ExtentLocal<T> {
         public void run(Runnable op) {
             Objects.requireNonNull(op);
             Cache.invalidate(bitmask);
-            var prevBindings = extentLocalBindings();
-            var snapshot = new Snapshot(this, prevBindings);
-            // ExtentLocal.setExtentLocalBindings(b);
+            var prevBindings = addExtentLocalBindings(this);
             try {
-                JLA.runWithExtentLocalBindings(Thread.currentThread(), snapshot, op);
-                // ExtentLocalContainer.run(op);
+                ExtentLocalContainer.run(op);
+            } catch (Throwable t) {
+                setExtentLocalCache(null); // Cache.invalidate();
+                throw t;
             } finally {
+                setExtentLocalBindings(prevBindings);
                 Cache.invalidate(bitmask);
             }
         }

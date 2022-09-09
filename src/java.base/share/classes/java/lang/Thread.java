@@ -289,6 +289,19 @@ public class Thread implements Runnable {
     }
 
     /**
+     * Returns the {@code AccessControlContext}. i.e., it gets
+     * the protection domains of all the callers on the stack,
+     * starting at the first class with a non-null
+     * {@code ProtectionDomain}.
+     *
+     * @return the access control context based on the current stack or
+     *         {@code null} if there was only privileged system code.
+     */
+
+    @IntrinsicCandidate
+    public static native Object findExtentLocalBindings();
+
+    /**
      * Inherit the extent-local bindings from the given container.
      * Invoked when starting a thread.
      */

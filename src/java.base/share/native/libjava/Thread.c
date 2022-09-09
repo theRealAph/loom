@@ -57,7 +57,8 @@ static JNINativeMethod methods[] = {
     {"setExtentLocalCache", "([" OBJ ")V",(void *)&JVM_SetExtentLocalCache},
     // {"runWithExtentLocalBindings", "(" THD OBJ OBJ ")V",(void *)&JVM_RunWithExtentLocalBindings},
     // {"callWithExtentLocalBindings", "(" THD OBJ OBJ ")" OBJ,(void *)&JVM_CallWithExtentLocalBindings},
-    {"getNextThreadIdOffset", "()J",     (void *)&JVM_GetNextThreadIdOffset}
+    {"getNextThreadIdOffset", "()J",     (void *)&JVM_GetNextThreadIdOffset},
+    {"findExtentLocalBindings", "()" OBJ, (void *)&JVM_FindExtentLocalBindings},
 };
 
 #undef THD
