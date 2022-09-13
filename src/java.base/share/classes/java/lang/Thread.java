@@ -1603,7 +1603,9 @@ public class Thread implements Runnable {
     public void run() {
         Runnable task = holder.task;
         if (task != null) {
+            var snapshot = extentLocalBindings();
             task.run();
+            java.lang.ref.Reference.reachabilityFence(snapshot);
         }
     }
 

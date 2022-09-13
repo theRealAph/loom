@@ -1371,23 +1371,31 @@ JVM_ENTRY(jobject, JVM_FindExtentLocalBindings(JNIEnv *env, jclass cls))
 
   bool found = false;
 
-  static Klass *k = SystemDictionary::resolve_or_fail(vmSymbols::jdk_incubator_concurrent_ExtentLocal_Carrier(), true, CHECK_NULL);
-  static InstanceKlass* ik = InstanceKlass::cast(k);
+  static Symbol *Carrier_name = vmSymbols::jdk_incubator_concurrent_ExtentLocal_Carrier();
+  static Klass *k = SystemDictionary::resolve_or_fail(Carrier_name, true, CHECK_NULL);
+  static InstanceKlass* Carrier_klass = InstanceKlass::cast(k);
 
   // Iterate through Java frames
   vframeStream vfst(thread);
   for(; !vfst.at_end(); vfst.next()) {
+    int loc = 0;
     // get method of frame
     Method* method = vfst.method();
 
-    if (method->method_holder() == ik &&
-      method->name() == vmSymbols::run_method_name() || method->name() == vmSymbols::call_method_name())
-    {
-      javaVFrame *frame = vfst.asJavaVFrame();       // executePrivileged
+    Symbol *name = method->name();
+    InstanceKlass *holder = method->method_holder();
+    if (holder == Carrier_klass &&
+        (name == vmSymbols::run_method_name() || name == vmSymbols::call_method_name())) {
+      loc = 3;
+    } else if (holder == vmClasses::Thread_klass()
+               && name == vmSymbols::run_method_name()) {
+      loc = 2;
+    }
+
+    if (loc != 0) {
+      javaVFrame *frame = vfst.asJavaVFrame();
       StackValueCollection* locals = frame->locals();
-      StackValue* prev_sv = locals->at(2);
-      StackValue* head_sv = locals->at(3); // jdk/incubator/concurrent/ExtentLocal$Snapshot
-      assert(!prev_sv->obj_is_scalar_replaced(), "found scalar-replaced object");
+      StackValue* head_sv = locals->at(loc); // jdk/incubator/concurrent/ExtentLocal$Snapshot
       assert(!head_sv->obj_is_scalar_replaced(), "found scalar-replaced object");
       Handle result = head_sv->get_obj();
       return JNIHandles::make_local(THREAD, result());

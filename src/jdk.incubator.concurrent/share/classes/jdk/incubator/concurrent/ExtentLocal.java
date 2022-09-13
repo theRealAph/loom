@@ -334,14 +334,14 @@ public final class ExtentLocal<T> {
             var newSnapshot = new Snapshot(this, prevSnapshot);
             R result;
             try {
-                setExtentLocalBindings(newSnapshot);
+                JLA.setExtentLocalBindings(newSnapshot);
                 result = ExtentLocalContainer.call(op);
             } catch (Throwable t) {
                 setExtentLocalCache(null); // Cache.invalidate();
                 Reference.reachabilityFence(newSnapshot);
                 throw t;
             } finally {
-                setExtentLocalBindings(prevSnapshot);
+                JLA.setExtentLocalBindings(prevSnapshot);
                 Cache.invalidate(bitmask);
             }
             Reference.reachabilityFence(newSnapshot);
@@ -368,13 +368,13 @@ public final class ExtentLocal<T> {
             var prevSnapshot = extentLocalBindings();
             var newSnapshot = new Snapshot(this, prevSnapshot);
             try {
-                setExtentLocalBindings(newSnapshot);
+                JLA.setExtentLocalBindings(newSnapshot);
                 ExtentLocalContainer.run(op);
             } catch (Throwable t) {
                 setExtentLocalCache(null); // Cache.invalidate();
                 throw t;
             } finally {
-                setExtentLocalBindings(prevSnapshot);
+                JLA.setExtentLocalBindings(prevSnapshot);
                 Cache.invalidate(bitmask);
             }
             Reference.reachabilityFence(newSnapshot);
@@ -386,7 +386,7 @@ public final class ExtentLocal<T> {
         private static final Snapshot addExtentLocalBindings(Carrier bindings) {
             Snapshot prev = extentLocalBindings();
             var b = new Snapshot(bindings, prev);
-            ExtentLocal.setExtentLocalBindings(b);
+            JLA.setExtentLocalBindings(b);
             return prev;
         }
     }
@@ -561,21 +561,17 @@ public final class ExtentLocal<T> {
 
     private static Snapshot extentLocalBindings() {
         Object bindings = JLA.extentLocalBindings();
-        if (bindings == null) {
-            bindings = JLA.findExtentLocalBindings();  // Search the stack
-            if (bindings == null) {
-                bindings = EmptySnapshot.getInstance();
-                JLA.setExtentLocalBindings(bindings);
-            }
-        } else if (bindings == NO_EXTENT_LOCAL_BINDINGS) {
-            bindings = EmptySnapshot.getInstance();
+        if (bindings == NO_EXTENT_LOCAL_BINDINGS) {
+            // This must be a new thread
+            JLA.setExtentLocalBindings(bindings = EmptySnapshot.getInstance());
+        } else if (bindings == null) {
+            // Search the stack
+            JLA.setExtentLocalBindings(bindings = JLA.findExtentLocalBindings());
         }
+        assert (bindings != null);
         return (Snapshot) bindings;
     }
 
-    private static void setExtentLocalBindings(Snapshot bindings) {
-        JLA.setExtentLocalBindings(bindings);
-    }
 
     private static int nextKey = 0xf0f0_f0f0;
 

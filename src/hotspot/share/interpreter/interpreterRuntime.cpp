@@ -375,7 +375,7 @@ JRT_ENTRY(void, InterpreterRuntime::throw_StackOverflowError(JavaThread* current
   // while we were trying to remove ExtentLocal bindings.
   current->set_extentLocalCache(NULL);
   // And the ExtentLocal bindings too.
-  oop threadObj = current->threadObj();
+  oop threadObj = current->vthread();
   java_lang_Thread::set_extentLocalBindings(threadObj, NULL);
   THROW_HANDLE(exception);
 JRT_END
@@ -392,7 +392,7 @@ JRT_ENTRY(void, InterpreterRuntime::throw_delayed_StackOverflowError(JavaThread*
   // while we were trying to remove ExtentLocal bindings.
   current->set_extentLocalCache(NULL);
   // And the ExtentLocal bindings too.
-  oop threadObj = current->threadObj();
+  oop threadObj = current->vthread();
   java_lang_Thread::set_extentLocalBindings(threadObj, NULL);
   THROW_HANDLE(exception);
 JRT_END
