@@ -1117,21 +1117,6 @@ class ResetMirrorField: public FieldClosure {
   }
 };
 
-static void set_klass_field_in_archived_mirror(oop mirror_obj, int offset, Klass* k) {
-  assert(java_lang_Class::is_instance(mirror_obj), "must be");
-  // this is the copy of k in the output buffer
-  Klass* copy = ArchiveBuilder::get_buffered_klass(k);
-
-  // This is the address of k, if the archive is loaded at the requested location
-  Klass* def = ArchiveBuilder::current()->to_requested(copy);
-
-  log_debug(cds, heap, mirror)(
-      "Relocate mirror metadata field at %d from " PTR_FORMAT " ==> " PTR_FORMAT,
-      offset, p2i(k), p2i(def));
-
-  mirror_obj->metadata_field_put(offset, def);
-}
-
 void java_lang_Class::archive_basic_type_mirrors() {
   assert(HeapShared::can_write(), "must be");
 
@@ -1142,11 +1127,6 @@ void java_lang_Class::archive_basic_type_mirrors() {
       // Update the field at _array_klass_offset to point to the relocated array klass.
       oop archived_m = HeapShared::archive_object(m);
       assert(archived_m != NULL, "sanity");
-      Klass *ak = (Klass*)(archived_m->metadata_field(_array_klass_offset));
-      assert(ak != NULL || t == T_VOID, "should not be NULL");
-      if (ak != NULL) {
-        set_klass_field_in_archived_mirror(archived_m, _array_klass_offset, ak);
-      }
 
       // Clear the fields. Just to be safe
       Klass *k = m->klass();
@@ -1260,46 +1240,8 @@ oop java_lang_Class::process_archived_mirror(Klass* k, oop mirror,
   set_class_loader(archived_mirror, NULL);
   set_module(archived_mirror, NULL);
 
-  // The archived mirror's field at _klass_offset is still pointing to the original
-  // klass. Updated the field in the archived mirror to point to the relocated
-  // klass in the archive.
-  set_klass_field_in_archived_mirror(archived_mirror, _klass_offset, as_Klass(mirror));
-
-  // The field at _array_klass_offset is pointing to the original one dimension
-  // higher array klass if exists. Relocate the pointer.
-  Klass *arr = array_klass_acquire(mirror);
-  if (arr != NULL) {
-    set_klass_field_in_archived_mirror(archived_mirror, _array_klass_offset, arr);
-  }
   return archived_mirror;
 }
-
-void java_lang_Class::update_archived_primitive_mirror_native_pointers(oop archived_mirror) {
-  if (MetaspaceShared::relocation_delta() != 0) {
-    assert(archived_mirror->metadata_field(_klass_offset) == NULL, "must be for primitive class");
-
-    Klass* ak = ((Klass*)archived_mirror->metadata_field(_array_klass_offset));
-    if (ak != NULL) {
-      archived_mirror->metadata_field_put(_array_klass_offset,
-          (Klass*)(address(ak) + MetaspaceShared::relocation_delta()));
-    }
-  }
-}
-
-void java_lang_Class::update_archived_mirror_native_pointers(oop archived_mirror) {
-  assert(MetaspaceShared::relocation_delta() != 0, "must be");
-
-  Klass* k = ((Klass*)archived_mirror->metadata_field(_klass_offset));
-  archived_mirror->metadata_field_put(_klass_offset,
-      (Klass*)(address(k) + MetaspaceShared::relocation_delta()));
-
-  Klass* ak = ((Klass*)archived_mirror->metadata_field(_array_klass_offset));
-  if (ak != NULL) {
-    archived_mirror->metadata_field_put(_array_klass_offset,
-        (Klass*)(address(ak) + MetaspaceShared::relocation_delta()));
-  }
-}
-
 
 // Returns true if the mirror is updated, false if no archived mirror
 // data is present. After the archived mirror object is restored, the
@@ -1740,7 +1682,7 @@ int java_lang_Thread::_interrupted_offset;
 int java_lang_Thread::_tid_offset;
 int java_lang_Thread::_continuation_offset;
 int java_lang_Thread::_park_blocker_offset;
-int java_lang_Thread::_extentLocalBindings_offset;
+int java_lang_Thread::_scopedValueBindings_offset;
 JFR_ONLY(int java_lang_Thread::_jfr_epoch_offset;)
 
 #define THREAD_FIELDS_DO(macro) \
@@ -1753,7 +1695,7 @@ JFR_ONLY(int java_lang_Thread::_jfr_epoch_offset;)
   macro(_tid_offset,           k, "tid", long_signature, false); \
   macro(_park_blocker_offset,  k, "parkBlocker", object_signature, false); \
   macro(_continuation_offset,  k, "cont", continuation_signature, false); \
-  macro(_extentLocalBindings_offset, k, "extentLocalBindings", object_signature, false);
+  macro(_scopedValueBindings_offset, k, "scopedValueBindings", object_signature, false);
 
 void java_lang_Thread::compute_offsets() {
   assert(_holder_offset == 0, "offsets should be initialized only once");
@@ -1786,9 +1728,9 @@ void java_lang_Thread::set_jvmti_thread_state(oop java_thread, JvmtiThreadState*
   java_thread->address_field_put(_jvmti_thread_state_offset, (address)state);
 }
 
-void java_lang_Thread::clear_extentLocalBindings(oop java_thread) {
+void java_lang_Thread::clear_scopedValueBindings(oop java_thread) {
   if (java_thread != NULL) {
-    java_thread->obj_field_put(_extentLocalBindings_offset, NULL);
+    java_thread->obj_field_put(_scopedValueBindings_offset, NULL);
   }
 }
 
@@ -3906,7 +3848,9 @@ oop java_lang_boxing_object::initialize_and_allocate(BasicType type, TRAPS) {
   Klass* k = vmClasses::box_klass(type);
   if (k == NULL)  return NULL;
   InstanceKlass* ik = InstanceKlass::cast(k);
-  if (!ik->is_initialized())  ik->initialize(CHECK_NULL);
+  if (!ik->is_initialized()) {
+    ik->initialize(CHECK_NULL);
+  }
   return ik->allocate_instance(THREAD);
 }
 

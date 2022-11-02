@@ -886,12 +886,12 @@ void SharedRuntime::throw_StackOverflowError_common(JavaThread* current, bool de
   if (StackTraceInThrowable) {
     java_lang_Throwable::fill_in_stack_trace(exception);
   }
-  // Remove the ExtentLocal cache in case we got a StackOverflowError
-  // while we were trying to remove ExtentLocal bindings.
-  current->set_extentLocalCache(NULL);
-  // And the ExtentLocal bindings too.
+  // Remove the ScopedValue cache in case we got a StackOverflowError
+  // while we were trying to remove ScopedValue bindings.
+  current->set_scopedValueCache(NULL);
+  // And the ScopedValue bindings too.
   oop threadObj = current->vthread();
-  java_lang_Thread::clear_extentLocalBindings(threadObj);
+  java_lang_Thread::clear_scopedValueBindings(threadObj);
   // Increment counter for hs_err file reporting
   Atomic::inc(&Exceptions::_stack_overflow_errors);
   throw_and_post_jvmti_exception(current, exception);
@@ -2100,8 +2100,6 @@ JRT_LEAF(void, SharedRuntime::fixup_callers_callsite(Method* method, address cal
 
   AARCH64_PORT_ONLY(assert(pauth_ptr_is_raw(caller_pc), "should be raw"));
 
-  address entry_point = moop->from_compiled_entry_no_trampoline();
-
   // It's possible that deoptimization can occur at a call site which hasn't
   // been resolved yet, in which case this function will be called from
   // an nmethod that has been patched for deopt and we can ignore the
@@ -2112,8 +2110,16 @@ JRT_LEAF(void, SharedRuntime::fixup_callers_callsite(Method* method, address cal
   // "to interpreter" stub in order to load up the Method*. Don't
   // ask me how I know this...
 
+  // Result from nmethod::is_unloading is not stable across safepoints.
+  NoSafepointVerifier nsv;
+
+  CompiledMethod* callee = moop->code();
+  if (callee == NULL) {
+    return;
+  }
+
   CodeBlob* cb = CodeCache::find_blob(caller_pc);
-  if (cb == NULL || !cb->is_compiled() || entry_point == moop->get_c2i_entry()) {
+  if (cb == NULL || !cb->is_compiled() || callee->is_unloading()) {
     return;
   }
 
@@ -2171,6 +2177,7 @@ JRT_LEAF(void, SharedRuntime::fixup_callers_callsite(Method* method, address cal
         }
       }
       address destination = call->destination();
+      address entry_point = callee->verified_entry_point();
       if (should_fixup_call_destination(destination, entry_point, caller_pc, moop, cb)) {
         call->set_destination_mt_safe(entry_point);
       }

@@ -253,8 +253,6 @@ class java_lang_Class : AllStatic {
                             Handle protection_domain, Handle classData, TRAPS);
   static void fixup_mirror(Klass* k, TRAPS);
   static oop  create_basic_type_mirror(const char* basic_type_name, BasicType type, TRAPS);
-  static void update_archived_primitive_mirror_native_pointers(oop archived_mirror) NOT_CDS_JAVA_HEAP_RETURN;
-  static void update_archived_mirror_native_pointers(oop archived_mirror) NOT_CDS_JAVA_HEAP_RETURN;
 
   // Archiving
   static void serialize_offsets(SerializeClosure* f) NOT_CDS_RETURN;
@@ -354,7 +352,7 @@ class java_lang_Thread : AllStatic {
   static int _tid_offset;
   static int _continuation_offset;
   static int _park_blocker_offset;
-  static int _extentLocalBindings_offset;
+  static int _scopedValueBindings_offset;
   JFR_ONLY(static int _jfr_epoch_offset;)
 
   static void compute_offsets();
@@ -400,8 +398,8 @@ class java_lang_Thread : AllStatic {
   static JvmtiThreadState* jvmti_thread_state(oop java_thread);
   static void set_jvmti_thread_state(oop java_thread, JvmtiThreadState* state);
 
-  // Clear all extent local bindings on error
-  static void clear_extentLocalBindings(oop java_thread);
+  // Clear all scoped value bindings on error
+  static void clear_scopedValueBindings(oop java_thread);
 
   // Blocker object responsible for thread parking
   static oop park_blocker(oop java_thread);

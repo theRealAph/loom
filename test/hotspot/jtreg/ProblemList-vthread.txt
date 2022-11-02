@@ -212,6 +212,7 @@ runtime/cds/appcds/BootClassPathMismatch.java 0000000 generic-all
 runtime/cds/appcds/CDSandJFR.java 0000000 generic-all
 runtime/cds/appcds/ClassPathAttr.java 0000000 generic-all
 runtime/cds/appcds/CommandLineFlagCombo.java 0000000 generic-all
+runtime/cds/appcds/CommonAppClasspath.java 0000000 generic-all
 runtime/cds/appcds/DumpClassList.java 0000000 generic-all
 runtime/cds/appcds/DumpingWithNoCoops.java 0000000 generic-all
 runtime/cds/appcds/ExtraSymbols.java 0000000 generic-all
@@ -292,6 +293,7 @@ runtime/cds/appcds/dynamicArchive/ArrayKlasses.java 0000000 generic-all
 runtime/cds/appcds/dynamicArchive/BasicLambdaTest.java 0000000 generic-all
 runtime/cds/appcds/dynamicArchive/CDSStreamTestDriver.java 0000000 generic-all
 runtime/cds/appcds/dynamicArchive/ClassResolutionFailure.java 0000000 generic-all
+runtime/cds/appcds/dynamicArchive/CommonAppClasspath.java 0000000 generic-all
 runtime/cds/appcds/dynamicArchive/DuplicatedCustomTest.java 0000000 generic-all
 runtime/cds/appcds/dynamicArchive/DynamicArchiveRelocationTest.java 0000000 generic-all
 runtime/cds/appcds/dynamicArchive/DynamicLambdaWithUseImplMethodHandle.java 0000000 generic-all
@@ -364,6 +366,7 @@ runtime/cds/appcds/jvmti/parallelLoad/ParallelLoadAndTransformTest.java 0000000 
 runtime/cds/appcds/jvmti/transformRelatedClasses/TransformInterfaceImplementorAppCDS.java 0000000 generic-all
 runtime/cds/appcds/jvmti/transformRelatedClasses/TransformSuperSubAppCDS.java 0000000 generic-all
 runtime/cds/appcds/loaderConstraints/DynamicLoaderConstraintsTest.java 0000000 generic-all
+runtime/cds/appcds/lambdaForm/DefaultClassListLFInvokers.java 0000000 generic-all
 runtime/cds/appcds/loaderConstraints/DynamicLoaderConstraintsTest.java#custom-cl-zgc
 runtime/cds/appcds/loaderConstraints/LoaderConstraintsTest.java 0000000 generic-all
 runtime/cds/appcds/methodHandles/MethodHandlesAsCollectorTest.java 0000000 generic-all
@@ -485,6 +488,11 @@ gc/g1/TestRemsetLoggingPerRegion.java 0000000 generic-all
 gc/g1/TestRemsetLogging.java 0000000 generic-all
 gc/g1/TestMixedGCLiveThreshold.java#25percent 0000000 generic-all
 gc/g1/plab/TestPLABResize.java 0000000 generic-all
+
+gc/shenandoah/oom/TestAllocLargeObj.java 0000000 generic-all
+gc/shenandoah/oom/TestAllocLargerThanHeap.java 0000000 generic-all
+gc/shenandoah/oom/TestAllocSmallObj.java 0000000 generic-all
+gc/shenandoah/oom/TestClassLoaderLeak.java 0000000 generic-all
 
 ####
 ## Expected exception is ignored
