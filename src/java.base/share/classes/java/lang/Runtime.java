@@ -89,10 +89,14 @@ import jdk.internal.reflect.Reflection;
  * shutdown sequence.
  *
  * <p>When the JVM terminates, all threads are immediately prevented from executing any further
- * Java code. This includes shutdown hooks as well as daemon and non-daemon threads. The
- * threads' current methods do not complete normally or abruptly; no {@code finally} clause
- * of any method is executed, nor is any {@linkplain Thread.UncaughtExceptionHandler
- * uncaught exception handler}.
+ * Java code. This includes shutdown hooks as well as daemon and non-daemon threads.
+ * This means, for example, that:
+ * <ul>
+ * <li>threads' current methods do not complete normally or abruptly;</li>
+ * <li>{@code finally} clauses are not executed;</li>
+ * <li>{@linkplain Thread.UncaughtExceptionHandler uncaught exception handlers} are not run; and</li>
+ * <li>resources opened with try-with-resources are not {@linkplain AutoCloseable closed};</li>
+ * </ul>
  *
  * @implNote
  * Native code typically uses the
@@ -109,6 +113,7 @@ import jdk.internal.reflect.Reflection;
  * typically terminate the OS process hosting the JVM and do not interact with the JNI Invocation
  * API.
  *
+ * @spec jni/index.html Java Native Interface Specification
  * @see     java.lang.Runtime#getRuntime()
  * @jls     12.8 Program Exit
  * @since   1.0
@@ -151,6 +156,11 @@ public class Runtime {
      *
      * <p> The {@link System#exit(int) System.exit} method is the
      * conventional and convenient means of invoking this method.
+     *
+     * @implNote
+     * If the {@linkplain System#getLogger(String) system logger} for {@code java.lang.Runtime}
+     * is enabled with logging level {@link System.Logger.Level#DEBUG Level.DEBUG} the stack trace
+     * of the call to {@code Runtime.exit()} is logged.
      *
      * @param  status
      *         Termination status.  By convention, a nonzero status code
@@ -278,7 +288,8 @@ public class Runtime {
      * @apiNote
      * This method should be used with extreme caution. Using it may circumvent or disrupt
      * any cleanup actions intended to be performed by shutdown hooks, possibly leading to
-     * data corruption.
+     * data corruption. See the <a href="#termination">termination</a> section above
+     * for other possible consequences of halting the Java Virtual Machine.
      *
      * @param  status
      *         Termination status. By convention, a nonzero status code
@@ -339,6 +350,10 @@ public class Runtime {
      * @throws  IllegalArgumentException
      *          If {@code command} is empty
      *
+     * @implNote
+     * In the reference implementation, logging of the created process can be enabled,
+     * see {@link ProcessBuilder#start()} for details.
+     *
      * @see     #exec(String[], String[], File)
      * @see     ProcessBuilder
      */
@@ -386,6 +401,10 @@ public class Runtime {
      *
      * @throws  IllegalArgumentException
      *          If {@code command} is empty
+     *
+     * @implNote
+     * In the reference implementation, logging of the created process can be enabled,
+     * see {@link ProcessBuilder#start()} for details.
      *
      * @see     #exec(String[], String[], File)
      * @see     ProcessBuilder
@@ -448,6 +467,10 @@ public class Runtime {
      * @throws  IllegalArgumentException
      *          If {@code command} is empty
      *
+     * @implNote
+     * In the reference implementation, logging of the created process can be enabled,
+     * see {@link ProcessBuilder#start()} for details.
+     *
      * @see     ProcessBuilder
      * @since 1.3
      */
@@ -493,6 +516,10 @@ public class Runtime {
      *          If {@code cmdarray} is an empty array
      *          (has length {@code 0})
      *
+     * @implNote
+     * In the reference implementation, logging of the created process can be enabled,
+     * see {@link ProcessBuilder#start()} for details.
+     *
      * @see     ProcessBuilder
      */
     public Process exec(String[] cmdarray) throws IOException {
@@ -536,6 +563,10 @@ public class Runtime {
      *          If {@code cmdarray} is an empty array
      *          (has length {@code 0})
      *
+     * @implNote
+     * In the reference implementation, logging of the created process can be enabled,
+     * see {@link ProcessBuilder#start()} for details.
+     *
      * @see     ProcessBuilder
      */
     public Process exec(String[] cmdarray, String[] envp) throws IOException {
@@ -564,6 +595,8 @@ public class Runtime {
      * be required to start a process on some operating systems.
      * As a result, the subprocess may inherit additional environment variable
      * settings beyond those in the specified environment.
+     * The minimal set of system dependent environment variables
+     * may override the values provided in the environment.
      *
      * <p>{@link ProcessBuilder#start()} is now the preferred way to
      * start a process with a modified environment.
@@ -628,6 +661,10 @@ public class Runtime {
      * @throws  IndexOutOfBoundsException
      *          If {@code cmdarray} is an empty array
      *          (has length {@code 0})
+     *
+     * @implNote
+     * In the reference implementation, logging of the created process can be enabled,
+     * see {@link ProcessBuilder#start()} for details.
      *
      * @see     ProcessBuilder
      * @since 1.3
@@ -787,6 +824,7 @@ public class Runtime {
      *             a native library image by the host system.
      * @throws     NullPointerException if {@code filename} is
      *             {@code null}
+     * @spec jni/index.html Java Native Interface Specification
      * @see        java.lang.Runtime#getRuntime()
      * @see        java.lang.SecurityException
      * @see        java.lang.SecurityManager#checkLink(java.lang.String)
@@ -852,6 +890,7 @@ public class Runtime {
      *             native library image by the host system.
      * @throws     NullPointerException if {@code libname} is
      *             {@code null}
+     * @spec jni/index.html Java Native Interface Specification
      * @see        java.lang.SecurityException
      * @see        java.lang.SecurityManager#checkLink(java.lang.String)
      */

@@ -25,12 +25,10 @@
 package jdk.internal.vm;
 
 import java.util.concurrent.Callable;
+import java.util.concurrent.StructureViolationException;
 import jdk.internal.access.JavaLangAccess;
 import jdk.internal.access.SharedSecrets;
-import jdk.internal.misc.StructureViolationExceptions;
 import jdk.internal.misc.Unsafe;
-import jdk.internal.vm.annotation.DontInline;
-import jdk.internal.vm.annotation.ReservedStackAccess;
 
 /**
  * A StackableScope to represent scoped-value bindings.
@@ -42,7 +40,7 @@ import jdk.internal.vm.annotation.ReservedStackAccess;
 public class ScopedValueContainer extends StackableScope {
     private static final JavaLangAccess JLA = SharedSecrets.getJavaLangAccess();
     static {
-        Unsafe.getUnsafe().ensureClassInitialized(StructureViolationExceptions.class);
+        Unsafe.getUnsafe().ensureClassInitialized(StructureViolationException.class);
     }
 
     private ScopedValueContainer() {
@@ -50,7 +48,7 @@ public class ScopedValueContainer extends StackableScope {
 
     /**
      * Returns the "latest" ScopedValueContainer for the current Thread. This may be on
-     * the current thread's scope task or ma require walking up the tree to find it.
+     * the current thread's scope task or may require walking up the tree to find it.
      */
     public static <T extends ScopedValueContainer> T latest(Class<T> containerClass) {
         StackableScope scope = head();
@@ -199,11 +197,10 @@ public class ScopedValueContainer extends StackableScope {
      * Throws {@code ex} if not null. StructureViolationException is thrown or added
      * as a suppressed exception when {@code atTop} is false.
      */
-    @DontInline @ReservedStackAccess
     private static void throwIfFailed(Throwable ex, boolean atTop) {
         if (ex != null || !atTop) {
             if (!atTop) {
-                var sve = StructureViolationExceptions.newException();
+                var sve = new StructureViolationException();
                 if (ex == null) {
                     ex = sve;
                 } else {

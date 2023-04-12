@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2019, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -64,14 +64,18 @@ public @interface PreviewFeature {
      * Values should be annotated with the feature's {@code JEP}.
      */
     public enum Feature {
-        @JEP(number=427, title="Pattern Matching for switch", status="Third Preview")
+        @JEP(number=433, title="Pattern Matching for switch", status="Fourth Preview")
         SWITCH_PATTERN_MATCHING(),
-        @JEP(number=405, title="Record Patterns")
+        @JEP(number=432, title="Record Patterns", status="Second Preview")
         RECORD_PATTERNS,
-        @JEP(number=425, title="Virtual Threads")
+        // not used
         VIRTUAL_THREADS,
-        @JEP(number=424, title="Foreign Function & Memory API")
+        @JEP(number=434, title="Foreign Function & Memory API", status="Second Preview")
         FOREIGN,
+        @JEP(number=100_001, title="Structured Concurrency", status="Preview")
+        STRUCTURED_CONCURRENCY,
+        @JEP(number=100_002, title="Scoped Values", status="Preview")
+        SCOPED_VALUES,
         /**
          * A key for testing.
          */
