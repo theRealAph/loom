@@ -25,6 +25,7 @@
 package org.openjdk.bench.java.lang;
 
 import java.util.concurrent.TimeUnit;
+import java.util.function.Supplier;
 import org.openjdk.jmh.annotations.*;
 import org.openjdk.jmh.infra.Blackhole;
 
@@ -164,6 +165,18 @@ public class ScopedValues {
     @OutputTimeUnit(TimeUnit.NANOSECONDS)
     public Object bind_ScopedValue() throws Exception {
         return HOLD_42.call(this::getClass);
+    }
+
+    static final Supplier<Class> supplyClass = new Supplier<Class>() {
+        public Class<?> get() { return getClass(); }
+    };
+
+    // Same, but make sure that Carrier.get(Supplier) is no slower
+    // than Carrier.call(Callable).
+    @Benchmark
+    @OutputTimeUnit(TimeUnit.NANOSECONDS)
+    public Object bindViaGet_ScopedValue() {
+        return HOLD_42.get(this::getClass);
     }
 
     @Benchmark
