@@ -396,7 +396,21 @@ public final class ScopedValue<T> {
             Cache.invalidate(bitmask);
             var prevSnapshot = scopedValueBindings();
             var newSnapshot = new Snapshot(this, prevSnapshot);
-            return runWith(newSnapshot, op::get);
+            return runWith(newSnapshot, new CallableAdapter<R>(op));
+        }
+
+        // A lightweight adapter from Supplier to Callable. This is
+        // used here to create the Callable which is passed to
+        // Carrier#call() in this thread because it needs neither
+        // runtime bytecode generation nor any release fencing.
+        private static final class CallableAdapter<V> implements Callable<V> {
+            private Supplier<? extends V> s;
+            CallableAdapter(Supplier<? extends V> s) {
+                this.s = s;
+            }
+            public V call() {
+                return s.get();
+            }
         }
 
         /**
