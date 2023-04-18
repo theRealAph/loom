@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2023, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2014, 2020, Red Hat Inc. All rights reserved.
  * Copyright (c) 2020, 2022, Huawei Technologies Co., Ltd. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
@@ -99,9 +99,9 @@ void InterpreterMacroAssembler::check_and_handle_popframe(Register java_thread) 
     // This method is only called just after the call into the vm in
     // call_VM_base, so the arg registers are available.
     lwu(t1, Address(xthread, JavaThread::popframe_condition_offset()));
-    andi(t0, t1, JavaThread::popframe_pending_bit);
+    test_bit(t0, t1, exact_log2(JavaThread::popframe_pending_bit));
     beqz(t0, L);
-    andi(t0, t1, JavaThread::popframe_processing_bit);
+    test_bit(t0, t1, exact_log2(JavaThread::popframe_processing_bit));
     bnez(t0, L);
     // Call Interpreter::remove_activation_preserving_args_entry() to get the
     // address of the same-named entrypoint in the generated interpreter code.
@@ -146,7 +146,7 @@ void InterpreterMacroAssembler::load_earlyret_value(TosState state) {
       ShouldNotReachHere();
   }
   // Clean up tos value in the thread object
-  mvw(t0, (int) ilgl);
+  mv(t0, (int)ilgl);
   sw(t0, tos_addr);
   sw(zr, val_addr);
 }
@@ -260,7 +260,7 @@ void InterpreterMacroAssembler::get_cache_entry_pointer_at_bcp(Register cache,
                                                                Register tmp,
                                                                int bcp_offset,
                                                                size_t index_size) {
-  assert(cache != tmp, "must use different register");
+  assert_different_registers(cache, tmp);
   get_cache_index_at_bcp(tmp, bcp_offset, index_size);
   assert(sizeof(ConstantPoolCacheEntry) == 4 * wordSize, "adjust code below");
   // Convert from field index to ConstantPoolCacheEntry index
@@ -523,7 +523,7 @@ void InterpreterMacroAssembler::dispatch_base(TosState state,
   if (needs_thread_local_poll) {
     NOT_PRODUCT(block_comment("Thread-local Safepoint poll"));
     ld(t1, Address(xthread, JavaThread::polling_word_offset()));
-    andi(t1, t1, SafepointMechanism::poll_bit());
+    test_bit(t1, t1, exact_log2(SafepointMechanism::poll_bit()));
     bnez(t1, safepoint);
   }
   if (table == Interpreter::dispatch_table(state)) {
@@ -620,7 +620,7 @@ void InterpreterMacroAssembler::remove_activation(
   // get method access flags
   ld(x11, Address(fp, frame::interpreter_frame_method_offset * wordSize));
   ld(x12, Address(x11, Method::access_flags_offset()));
-  andi(t0, x12, JVM_ACC_SYNCHRONIZED);
+  test_bit(t0, x12, exact_log2(JVM_ACC_SYNCHRONIZED));
   beqz(t0, unlocked);
 
   // Don't unlock anything if the _do_not_unlock_if_synchronized flag
@@ -786,7 +786,7 @@ void InterpreterMacroAssembler::lock_object(Register lock_reg)
             CAST_FROM_FN_PTR(address, InterpreterRuntime::monitorenter),
             lock_reg);
   } else {
-    Label done;
+    Label count, done;
 
     const Register swap_reg = x10;
     const Register tmp = c_rarg2;
@@ -805,7 +805,7 @@ void InterpreterMacroAssembler::lock_object(Register lock_reg)
     if (DiagnoseSyncOnValueBasedClasses != 0) {
       load_klass(tmp, obj_reg);
       lwu(tmp, Address(tmp, Klass::access_flags_offset()));
-      andi(tmp, tmp, JVM_ACC_IS_VALUE_BASED_CLASS);
+      test_bit(tmp, tmp, exact_log2(JVM_ACC_IS_VALUE_BASED_CLASS));
       bnez(tmp, slow_case);
     }
 
@@ -819,7 +819,7 @@ void InterpreterMacroAssembler::lock_object(Register lock_reg)
     assert(lock_offset == 0,
            "displached header must be first word in BasicObjectLock");
 
-    cmpxchg_obj_header(swap_reg, lock_reg, obj_reg, t0, done, /*fallthrough*/NULL);
+    cmpxchg_obj_header(swap_reg, lock_reg, obj_reg, t0, count, /*fallthrough*/NULL);
 
     // Test if the oopMark is an obvious stack pointer, i.e.,
     //  1) (mark & 7) == 0, and
@@ -831,12 +831,12 @@ void InterpreterMacroAssembler::lock_object(Register lock_reg)
     // least significant 3 bits clear.
     // NOTE: the oopMark is in swap_reg x10 as the result of cmpxchg
     sub(swap_reg, swap_reg, sp);
-    mv(t0, (int64_t)(7 - os::vm_page_size()));
+    mv(t0, (int64_t)(7 - (int)os::vm_page_size()));
     andr(swap_reg, swap_reg, t0);
 
     // Save the test result, for recursive case, the result is zero
     sd(swap_reg, Address(lock_reg, mark_offset));
-    beqz(swap_reg, done);
+    beqz(swap_reg, count);
 
     bind(slow_case);
 
@@ -844,6 +844,11 @@ void InterpreterMacroAssembler::lock_object(Register lock_reg)
     call_VM(noreg,
             CAST_FROM_FN_PTR(address, InterpreterRuntime::monitorenter),
             lock_reg);
+
+    j(done);
+
+    bind(count);
+    increment(Address(xthread, JavaThread::held_monitor_count_offset()));
 
     bind(done);
   }
@@ -868,7 +873,7 @@ void InterpreterMacroAssembler::unlock_object(Register lock_reg)
   if (UseHeavyMonitors) {
     call_VM_leaf(CAST_FROM_FN_PTR(address, InterpreterRuntime::monitorexit), lock_reg);
   } else {
-    Label done;
+    Label count, done;
 
     const Register swap_reg   = x10;
     const Register header_reg = c_rarg2;  // Will contain the old oopMark
@@ -891,14 +896,19 @@ void InterpreterMacroAssembler::unlock_object(Register lock_reg)
                            BasicLock::displaced_header_offset_in_bytes()));
 
     // Test for recursion
-    beqz(header_reg, done);
+    beqz(header_reg, count);
 
     // Atomic swap back the old header
-    cmpxchg_obj_header(swap_reg, header_reg, obj_reg, t0, done, /*fallthrough*/NULL);
+    cmpxchg_obj_header(swap_reg, header_reg, obj_reg, t0, count, /*fallthrough*/NULL);
 
     // Call the runtime routine for slow case.
     sd(obj_reg, Address(lock_reg, BasicObjectLock::obj_offset_in_bytes())); // restore obj
     call_VM_leaf(CAST_FROM_FN_PTR(address, InterpreterRuntime::monitorexit), lock_reg);
+
+    j(done);
+
+    bind(count);
+    decrement(Address(xthread, JavaThread::held_monitor_count_offset()));
 
     bind(done);
 
@@ -1487,8 +1497,8 @@ void InterpreterMacroAssembler::profile_switch_case(Register index,
 
     // Build the base (index * per_case_size_in_bytes()) +
     // case_array_offset_in_bytes()
-    mvw(reg2, in_bytes(MultiBranchData::per_case_size()));
-    mvw(t0, in_bytes(MultiBranchData::case_array_offset()));
+    mv(reg2, in_bytes(MultiBranchData::per_case_size()));
+    mv(t0, in_bytes(MultiBranchData::case_array_offset()));
     Assembler::mul(index, index, reg2);
     Assembler::add(index, index, t0);
 
@@ -1663,7 +1673,7 @@ void InterpreterMacroAssembler::profile_obj_type(Register obj, const Address& md
                   // do. The unknown bit may have been
                   // set already but no need to check.
 
-  andi(t0, obj, TypeEntries::type_unknown);
+  test_bit(t0, obj, exact_log2(TypeEntries::type_unknown));
   bnez(t0, next);
   // already unknown. Nothing to do anymore.
 
@@ -1906,6 +1916,18 @@ void InterpreterMacroAssembler::profile_parameters_type(Register mdp, Register t
   }
 }
 
+void InterpreterMacroAssembler::load_resolved_indy_entry(Register cache, Register index) {
+  // Get index out of bytecode pointer, get_cache_entry_pointer_at_bcp
+  get_cache_index_at_bcp(index, 1, sizeof(u4));
+  // Get address of invokedynamic array
+  ld(cache, Address(xcpool, in_bytes(ConstantPoolCache::invokedynamic_entries_offset())));
+  // Scale the index to be the entry index * sizeof(ResolvedInvokeDynamicInfo)
+  slli(index, index, log2i_exact(sizeof(ResolvedIndyEntry)));
+  add(cache, cache, Array<ResolvedIndyEntry>::base_offset_in_bytes());
+  add(cache, cache, index);
+  la(cache, Address(cache, 0));
+}
+
 void InterpreterMacroAssembler::get_method_counters(Register method,
                                                     Register mcs, Label& skip) {
   Label has_counters;
@@ -1919,10 +1941,10 @@ void InterpreterMacroAssembler::get_method_counters(Register method,
 }
 
 #ifdef ASSERT
-void InterpreterMacroAssembler::verify_access_flags(Register access_flags, uint32_t flag_bits,
+void InterpreterMacroAssembler::verify_access_flags(Register access_flags, uint32_t flag,
                                                     const char* msg, bool stop_by_hit) {
   Label L;
-  andi(t0, access_flags, flag_bits);
+  test_bit(t0, access_flags, exact_log2(flag));
   if (stop_by_hit) {
     beqz(t0, L);
   } else {

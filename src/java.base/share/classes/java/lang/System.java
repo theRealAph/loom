@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1994, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1994, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -89,7 +89,6 @@ import jdk.internal.vm.ThreadContainer;
 import jdk.internal.vm.annotation.ForceInline;
 import jdk.internal.vm.annotation.IntrinsicCandidate;
 import jdk.internal.vm.annotation.Stable;
-import jdk.internal.vm.annotation.ChangesCurrentThread;
 import sun.nio.fs.DefaultFileSystemProvider;
 import sun.reflect.annotation.AnnotationType;
 import sun.nio.ch.Interruptible;
@@ -188,6 +187,9 @@ public final class System {
      * @see     <a href="#stderr.encoding">stderr.encoding</a>
      */
     public static final PrintStream err = null;
+
+    // Holder for the initial value of `in`, set within `initPhase1()`.
+    private static InputStream initialIn;
 
     // indicates if a security manager is possible
     private static final int NEVER = 1;
@@ -1899,6 +1901,9 @@ public final class System {
      * Runtime.getRuntime().exit(n)
      * </pre></blockquote>
      *
+     * @implNote
+     * The initiation of the shutdown sequence is logged by {@link Runtime#exit(int)}.
+     *
      * @param  status exit status.
      * @throws SecurityException
      *         if a security manager exists and its {@code checkExit} method
@@ -2004,6 +2009,8 @@ public final class System {
      *             linked with the VM, or the library cannot be mapped to
      *             a native library image by the host system.
      * @throws     NullPointerException if {@code filename} is {@code null}
+     *
+     * @spec jni/index.html Java Native Interface Specification
      * @see        java.lang.Runtime#load(java.lang.String)
      * @see        java.lang.SecurityManager#checkLink(java.lang.String)
      */
@@ -2040,6 +2047,8 @@ public final class System {
      *             linked with the VM,  or the library cannot be mapped to a
      *             native library image by the host system.
      * @throws     NullPointerException if {@code libname} is {@code null}
+     *
+     * @spec jni/index.html Java Native Interface Specification
      * @see        java.lang.Runtime#loadLibrary(java.lang.String)
      * @see        java.lang.SecurityManager#checkLink(java.lang.String)
      */
@@ -2174,7 +2183,8 @@ public final class System {
         FileInputStream fdIn = new FileInputStream(FileDescriptor.in);
         FileOutputStream fdOut = new FileOutputStream(FileDescriptor.out);
         FileOutputStream fdErr = new FileOutputStream(FileDescriptor.err);
-        setIn0(new BufferedInputStream(fdIn));
+        initialIn = new BufferedInputStream(fdIn);
+        setIn0(initialIn);
         // stdout/err.encoding are set when the VM is associated with the terminal,
         // thus they are equivalent to Console.charset(), otherwise the encodings
         // of those properties default to native.encoding
@@ -2244,6 +2254,12 @@ public final class System {
         // bootstrap circularity issues that could be caused by a custom
         // SecurityManager
         Unsafe.getUnsafe().ensureClassInitialized(StringConcatFactory.class);
+
+        // Emit a warning if java.io.tmpdir is set via the command line
+        // to a directory that doesn't exist
+        if (SystemProps.isBadIoTmpdir()) {
+            System.err.println("WARNING: java.io.tmpdir directory does not exist");
+        }
 
         String smProp = System.getProperty("java.security.manager");
         boolean needWarning = false;
@@ -2432,11 +2448,11 @@ public final class System {
             public Module addEnableNativeAccess(Module m) {
                 return m.implAddEnableNativeAccess();
             }
-            public void addEnableNativeAccessAllUnnamed() {
-                Module.implAddEnableNativeAccessAllUnnamed();
+            public void addEnableNativeAccessToAllUnnamed() {
+                Module.implAddEnableNativeAccessToAllUnnamed();
             }
-            public boolean isEnableNativeAccess(Module m) {
-                return m.implIsEnableNativeAccess();
+            public void ensureNativeAccess(Module m, Class<?> owner, String methodName) {
+                m.ensureNativeAccess(owner, methodName);
             }
             public ServicesCatalog getServicesCatalog(ModuleLayer layer) {
                 return layer.getServicesCatalog();
@@ -2451,16 +2467,21 @@ public final class System {
                 return ModuleLayer.layers(loader);
             }
 
+            public int countPositives(byte[] bytes, int offset, int length) {
+                return StringCoding.countPositives(bytes, offset, length);
+            }
             public String newStringNoRepl(byte[] bytes, Charset cs) throws CharacterCodingException  {
                 return String.newStringNoRepl(bytes, cs);
             }
-
+            public char getUTF16Char(byte[] bytes, int index) {
+                return StringUTF16.getChar(bytes, index);
+            }
             public byte[] getBytesNoRepl(String s, Charset cs) throws CharacterCodingException {
                 return String.getBytesNoRepl(s, cs);
             }
 
             public String newStringUTF8NoRepl(byte[] bytes, int off, int len) {
-                return String.newStringUTF8NoRepl(bytes, off, len);
+                return String.newStringUTF8NoRepl(bytes, off, len, true);
             }
 
             public byte[] getBytesUTF8NoRepl(String s) {
@@ -2477,6 +2498,10 @@ public final class System {
 
             public int encodeASCII(char[] src, int srcOff, byte[] dst, int dstOff, int len) {
                 return StringCoding.implEncodeAsciiArray(src, srcOff, dst, dstOff, len);
+            }
+
+            public InputStream initialSystemIn() {
+                return initialIn;
             }
 
             public void setCause(Throwable t, Throwable cause) {
@@ -2541,17 +2566,9 @@ public final class System {
                 return Thread.currentCarrierThread();
             }
 
-            @ChangesCurrentThread
             public <V> V executeOnCarrierThread(Callable<V> task) throws Exception {
-                Thread thread = Thread.currentThread();
-                if (thread.isVirtual()) {
-                    Thread carrier = Thread.currentCarrierThread();
-                    carrier.setCurrentThread(carrier);
-                    try {
-                        return task.call();
-                    } finally {
-                        carrier.setCurrentThread(thread);
-                    }
+                if (Thread.currentThread() instanceof VirtualThread vthread) {
+                    return vthread.executeOnCarrierThread(task);
                 } else {
                     return task.call();
                 }
@@ -2583,19 +2600,6 @@ public final class System {
 
             public Object scopedValueBindings() {
                 return Thread.scopedValueBindings();
-            }
-
-            public Object findScopedValueBindings() {
-                return Thread.findScopedValueBindings();
-            }
-
-            public void setScopedValueBindings(Object bindings) {
-                Thread.setScopedValueBindings(bindings);
-            }
-
-            @ForceInline
-            public void ensureMaterializedForStackWalk(Object value) {
-                Thread.ensureMaterializedForStackWalk(value);
             }
 
             public Continuation getContinuation(Thread thread) {
@@ -2640,6 +2644,10 @@ public final class System {
                                                       ContinuationScope contScope,
                                                       Continuation continuation) {
                 return StackWalker.newInstance(options, null, contScope, continuation);
+            }
+
+            public String getLoaderNameID(ClassLoader loader) {
+                return loader.nameAndId();
             }
         });
     }

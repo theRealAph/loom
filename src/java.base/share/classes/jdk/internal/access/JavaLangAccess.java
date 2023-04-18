@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2003, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2003, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -25,6 +25,7 @@
 
 package jdk.internal.access;
 
+import java.io.InputStream;
 import java.lang.annotation.Annotation;
 import java.lang.invoke.MethodHandle;
 import java.lang.invoke.MethodType;
@@ -270,12 +271,13 @@ public interface JavaLangAccess {
     /**
      * Updates all unnamed modules to allow access to restricted methods.
      */
-    void addEnableNativeAccessAllUnnamed();
+    void addEnableNativeAccessToAllUnnamed();
 
     /**
-     * Returns true if module m can access restricted methods.
+     * Ensure that the given module has native access. If not, warn or
+     * throw exception depending on the configuration.
      */
-    boolean isEnableNativeAccess(Module m);
+    void ensureNativeAccess(Module m, Class<?> owner, String methodName);
 
     /**
      * Returns the ServicesCatalog for the given Layer.
@@ -299,6 +301,11 @@ public interface JavaLangAccess {
      * given class loader.
      */
     Stream<ModuleLayer> layers(ClassLoader loader);
+
+    /**
+     * Count the number of leading positive bytes in the range.
+     */
+    int countPositives(byte[] ba, int off, int len);
 
     /**
      * Constructs a new {@code String} by decoding the specified subarray of
@@ -341,6 +348,16 @@ public interface JavaLangAccess {
     String newStringUTF8NoRepl(byte[] bytes, int off, int len);
 
     /**
+     * Get the char at index in a byte[] in internal UTF-16 representation,
+     * with no bounds checks.
+     *
+     * @param bytes the UTF-16 encoded bytes
+     * @param index of the char to retrieve, 0 <= index < (bytes.length >> 1)
+     * @return the char value
+     */
+    char getUTF16Char(byte[] bytes, int index);
+
+    /**
      * Encode the given string into a sequence of bytes using utf8.
      *
      * @param s the string to encode
@@ -361,6 +378,12 @@ public interface JavaLangAccess {
      * @return the number of bytes successfully decoded, at most len
      */
     int decodeASCII(byte[] src, int srcOff, char[] dst, int dstOff, int len);
+
+    /**
+     * Returns the initial `System.in` to determine if it is replaced
+     * with `System.setIn(newIn)` method
+     */
+    InputStream initialSystemIn();
 
     /**
      * Encodes ASCII codepoints as possible from the source array into
@@ -490,15 +513,6 @@ public interface JavaLangAccess {
     Object scopedValueBindings();
 
     /**
-     * Set the current thread's scoped value bindings.
-     */
-    void setScopedValueBindings(Object bindings);
-
-    Object findScopedValueBindings();
-
-    void ensureMaterializedForStackWalk(Object value);
-
-    /**
      * Returns the innermost mounted continuation
      */
     Continuation getContinuation(Thread thread);
@@ -541,4 +555,9 @@ public interface JavaLangAccess {
     StackWalker newStackWalkerInstance(Set<StackWalker.Option> options,
                                        ContinuationScope contScope,
                                        Continuation continuation);
+    /**
+     * Returns '<loader-name>' @<id> if classloader has a name
+     * explicitly set otherwise <qualified-class-name> @<id>
+     */
+    String getLoaderNameID(ClassLoader loader);
 }
