@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1996, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1996, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -246,6 +246,7 @@ public class ObjectOutputStream
      * @see     ObjectOutputStream#putFields()
      * @see     ObjectInputStream#ObjectInputStream(InputStream)
      */
+    @SuppressWarnings("this-escape")
     public ObjectOutputStream(OutputStream out) throws IOException {
         verifySubclass();
         bout = new BlockDataOutputStream(out);
@@ -1026,7 +1027,7 @@ public class ObjectOutputStream
          *         calling the {@link java.io.ObjectOutputStream#writeFields()}
          *         method.
          */
-        @Deprecated
+        @Deprecated(forRemoval = true, since = "1.4")
         public abstract void write(ObjectOutput out) throws IOException;
     }
 
@@ -1271,7 +1272,7 @@ public class ObjectOutputStream
         }
 
         bout.setBlockDataMode(true);
-        if (cl != null && isCustomSubclass()) {
+        if (isCustomSubclass()) {
             ReflectUtil.checkPackageAccess(cl);
         }
         annotateProxyClass(cl);

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -233,11 +233,11 @@ protected:
   }
 
 private:
-  DEFINE_PAD_MINUS_SIZE(0, DEFAULT_CACHE_LINE_SIZE, 0);
+  DEFINE_PAD_MINUS_SIZE(0, DEFAULT_PADDING_SIZE, 0);
 
   // Index of the first free element after the last one pushed (mod N).
   volatile uint _bottom;
-  DEFINE_PAD_MINUS_SIZE(1, DEFAULT_CACHE_LINE_SIZE, sizeof(uint));
+  DEFINE_PAD_MINUS_SIZE(1, DEFAULT_PADDING_SIZE, sizeof(uint));
 
   // top() is the index of the oldest pushed element (mod N), and tag()
   // is the associated epoch, to distinguish different modifications of
@@ -245,7 +245,7 @@ private:
   // (_bottom - top()) mod N == N-1; the latter indicates underflow
   // during concurrent pop_local/pop_global.
   volatile Age _age;
-  DEFINE_PAD_MINUS_SIZE(2, DEFAULT_CACHE_LINE_SIZE, sizeof(Age));
+  DEFINE_PAD_MINUS_SIZE(2, DEFAULT_PADDING_SIZE, sizeof(Age));
 
   NONCOPYABLE(TaskQueueSuper);
 
@@ -396,7 +396,7 @@ private:
   // Element array.
   E* _elems;
 
-  DEFINE_PAD_MINUS_SIZE(1, DEFAULT_CACHE_LINE_SIZE, sizeof(E*));
+  DEFINE_PAD_MINUS_SIZE(1, DEFAULT_PADDING_SIZE, sizeof(E*));
   // Queue owner local variables. Not to be accessed by other threads.
 
   static const uint InvalidQueueId = uint(-1);
@@ -404,7 +404,7 @@ private:
 
   int _seed; // Current random seed used for selecting a random queue during stealing.
 
-  DEFINE_PAD_MINUS_SIZE(2, DEFAULT_CACHE_LINE_SIZE, sizeof(uint) + sizeof(int));
+  DEFINE_PAD_MINUS_SIZE(2, DEFAULT_PADDING_SIZE, sizeof(uint) + sizeof(int));
 public:
   int next_random_queue_id();
 
@@ -576,6 +576,7 @@ private:
 // Wrapper over an oop that is a partially scanned array.
 // Can be converted to a ScannerTask for placement in associated task queues.
 // Refers to the partially copied source array oop.
+// Temporarily retained to support ParallelGC until it adopts PartialArrayState.
 class PartialArrayScanTask {
   oop _src;
 
@@ -586,7 +587,9 @@ public:
   oop to_source_array() const { return _src; }
 };
 
-// Discriminated union over oop*, narrowOop*, and PartialArrayScanTask.
+class PartialArrayState;
+
+// Discriminated union over oop*, narrowOop*, and PartialArrayState.
 // Uses a low tag in the associated pointer to identify the category.
 // Used as a task queue element type.
 class ScannerTask {
@@ -624,8 +627,12 @@ public:
 
   explicit ScannerTask(narrowOop* p) : _p(encode(p, NarrowOopTag)) {}
 
+  // Temporarily retained to support ParallelGC until it adopts PartialArrayState.
   explicit ScannerTask(PartialArrayScanTask t) :
     _p(encode(t.to_source_array(), PartialArrayTag)) {}
+
+  explicit ScannerTask(PartialArrayState* state) :
+    _p(encode(state, PartialArrayTag)) {}
 
   // Trivially copyable.
 
@@ -639,7 +646,12 @@ public:
     return (raw_value() & NarrowOopTag) != 0;
   }
 
+  // Temporarily retained to support ParallelGC until it adopts PartialArrayState.
   bool is_partial_array_task() const {
+    return (raw_value() & PartialArrayTag) != 0;
+  }
+
+  bool is_partial_array_state() const {
     return (raw_value() & PartialArrayTag) != 0;
   }
 
@@ -651,8 +663,13 @@ public:
     return static_cast<narrowOop*>(decode(NarrowOopTag));
   }
 
+  // Temporarily retained to support ParallelGC until it adopts PartialArrayState.
   PartialArrayScanTask to_partial_array_task() const {
     return PartialArrayScanTask(cast_to_oop(decode(PartialArrayTag)));
+  }
+
+  PartialArrayState* to_partial_array_state() const {
+    return static_cast<PartialArrayState*>(decode(PartialArrayTag));
   }
 };
 

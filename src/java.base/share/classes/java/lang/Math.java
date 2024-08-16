@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1994, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1994, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -55,44 +55,46 @@ import jdk.internal.vm.annotation.IntrinsicCandidate;
  * <p>The quality of implementation specifications concern two
  * properties, accuracy of the returned result and monotonicity of the
  * method.  Accuracy of the floating-point {@code Math} methods is
- * measured in terms of <i>ulps</i>, units in the last place.  For a
- * given floating-point format, an {@linkplain #ulp(double) ulp} of a
- * specific real number value is the distance between the two
- * floating-point values bracketing that numerical value.  When
- * discussing the accuracy of a method as a whole rather than at a
- * specific argument, the number of ulps cited is for the worst-case
- * error at any argument.  If a method always has an error less than
- * 0.5 ulps, the method always returns the floating-point number
- * nearest the exact result; such a method is <i>correctly
- * rounded</i>.  A correctly rounded method is generally the best a
- * floating-point approximation can be; however, it is impractical for
- * many floating-point methods to be correctly rounded.  Instead, for
- * the {@code Math} class, a larger error bound of 1 or 2 ulps is
- * allowed for certain methods.  Informally, with a 1 ulp error bound,
- * when the exact result is a representable number, the exact result
- * should be returned as the computed result; otherwise, either of the
- * two floating-point values which bracket the exact result may be
- * returned.  For exact results large in magnitude, one of the
- * endpoints of the bracket may be infinite.  Besides accuracy at
- * individual arguments, maintaining proper relations between the
- * method at different arguments is also important.  Therefore, most
- * methods with more than 0.5 ulp errors are required to be
- * <i>semi-monotonic</i>: whenever the mathematical function is
- * non-decreasing, so is the floating-point approximation, likewise,
- * whenever the mathematical function is non-increasing, so is the
- * floating-point approximation.  Not all approximations that have 1
- * ulp accuracy will automatically meet the monotonicity requirements.
+ * measured in terms of <dfn>{@index ulp}s</dfn>, {@index "units in
+ * the last place"}.  For a given floating-point format, an
+ * {@linkplain #ulp(double) ulp} of a specific real number value is
+ * the distance between the two floating-point values bracketing that
+ * numerical value.  When discussing the accuracy of a method as a
+ * whole rather than at a specific argument, the number of ulps cited
+ * is for the worst-case error at any argument.  If a method always
+ * has an error less than 0.5 ulps, the method always returns the
+ * floating-point number nearest the exact result; such a method is
+ * <dfn>correctly rounded</dfn>.  A {@index "correctly rounded"}
+ * method is generally the best a floating-point approximation can be;
+ * however, it is impractical for many floating-point methods to be
+ * correctly rounded.  Instead, for the {@code Math} class, a larger
+ * error bound of 1 or 2 ulps is allowed for certain methods.
+ * Informally, with a 1 ulp error bound, when the exact result is a
+ * representable number, the exact result should be returned as the
+ * computed result; otherwise, either of the two floating-point values
+ * which bracket the exact result may be returned.  For exact results
+ * large in magnitude, one of the endpoints of the bracket may be
+ * infinite.  Besides accuracy at individual arguments, maintaining
+ * proper relations between the method at different arguments is also
+ * important.  Therefore, most methods with more than 0.5 ulp errors
+ * are required to be <dfn>{@index "semi-monotonic"}</dfn>: whenever
+ * the mathematical function is non-decreasing, so is the
+ * floating-point approximation, likewise, whenever the mathematical
+ * function is non-increasing, so is the floating-point approximation.
+ * Not all approximations that have 1 ulp accuracy will automatically
+ * meet the monotonicity requirements.
  *
  * <p>
  * The platform uses signed two's complement integer arithmetic with
- * int and long primitive types.  The developer should choose
- * the primitive type to ensure that arithmetic operations consistently
- * produce correct results, which in some cases means the operations
- * will not overflow the range of values of the computation.
- * The best practice is to choose the primitive type and algorithm to avoid
- * overflow. In cases where the size is {@code int} or {@code long} and
- * overflow errors need to be detected, the methods whose names end with
- * {@code Exact} throw an {@code ArithmeticException} when the results overflow.
+ * {@code int} and {@code long} primitive types.  The developer should
+ * choose the primitive type to ensure that arithmetic operations
+ * consistently produce correct results, which in some cases means the
+ * operations will not overflow the range of values of the
+ * computation.  The best practice is to choose the primitive type and
+ * algorithm to avoid overflow. In cases where the size is {@code int}
+ * or {@code long} and overflow errors need to be detected, the
+ * methods whose names end with {@code Exact} throw an {@code
+ * ArithmeticException} when the results overflow.
  *
  * <h2><a id=Ieee754RecommendedOps>IEEE 754 Recommended
  * Operations</a></h2>
@@ -119,7 +121,6 @@ import jdk.internal.vm.annotation.IntrinsicCandidate;
  * @see <a href="https://standards.ieee.org/ieee/754/6210/">
  *      <cite>IEEE Standard for Floating-Point Arithmetic</cite></a>
  *
- * @author  Joseph D. Darcy
  * @since   1.0
  */
 
@@ -211,7 +212,7 @@ public final class Math {
      * <li>If the argument is zero, then the result is a zero with the
      * same sign as the argument.</ul>
      *
-     * <p>The computed result must be within 1 ulp of the exact result.
+     * <p>The computed result must be within 1.25 ulps of the exact result.
      * Results must be semi-monotonic.
      *
      * @param   a   an angle, in radians.
@@ -224,7 +225,7 @@ public final class Math {
 
     /**
      * Returns the arc sine of a value; the returned angle is in the
-     * range -<i>pi</i>/2 through <i>pi</i>/2.  Special cases:
+     * range &minus;<i>pi</i>/2 through <i>pi</i>/2.  Special cases:
      * <ul><li>If the argument is NaN or its absolute value is greater
      * than 1, then the result is NaN.
      * <li>If the argument is zero, then the result is a zero with the
@@ -260,7 +261,7 @@ public final class Math {
 
     /**
      * Returns the arc tangent of a value; the returned angle is in the
-     * range -<i>pi</i>/2 through <i>pi</i>/2.  Special cases:
+     * range &minus;<i>pi</i>/2 through <i>pi</i>/2.  Special cases:
      * <ul><li>If the argument is NaN, then the result is NaN.
      * <li>If the argument is zero, then the result is a zero with the
      * same sign as the argument.
@@ -552,7 +553,7 @@ public final class Math {
      * coordinates ({@code x},&nbsp;{@code y}) to polar
      * coordinates (r,&nbsp;<i>theta</i>).
      * This method computes the phase <i>theta</i> by computing an arc tangent
-     * of {@code y/x} in the range of -<i>pi</i> to <i>pi</i>. Special
+     * of {@code y/x} in the range of &minus;<i>pi</i> to <i>pi</i>. Special
      * cases:
      * <ul><li>If either argument is NaN, then the result is NaN.
      * <li>If the first argument is positive zero and the second argument
@@ -2644,7 +2645,7 @@ public final class Math {
     /**
      * Returns the hyperbolic sine of a {@code double} value.
      * The hyperbolic sine of <i>x</i> is defined to be
-     * (<i>e<sup>x</sup>&nbsp;-&nbsp;e<sup>-x</sup></i>)/2
+     * (<i>e<sup>x</sup>&nbsp;&minus;&nbsp;e<sup>&minus;x</sup></i>)/2
      * where <i>e</i> is {@linkplain Math#E Euler's number}.
      *
      * <p>Special cases:
@@ -2673,7 +2674,7 @@ public final class Math {
     /**
      * Returns the hyperbolic cosine of a {@code double} value.
      * The hyperbolic cosine of <i>x</i> is defined to be
-     * (<i>e<sup>x</sup>&nbsp;+&nbsp;e<sup>-x</sup></i>)/2
+     * (<i>e<sup>x</sup>&nbsp;+&nbsp;e<sup>&minus;x</sup></i>)/2
      * where <i>e</i> is {@linkplain Math#E Euler's number}.
      *
      * <p>Special cases:
@@ -2701,7 +2702,7 @@ public final class Math {
     /**
      * Returns the hyperbolic tangent of a {@code double} value.
      * The hyperbolic tangent of <i>x</i> is defined to be
-     * (<i>e<sup>x</sup>&nbsp;-&nbsp;e<sup>-x</sup></i>)/(<i>e<sup>x</sup>&nbsp;+&nbsp;e<sup>-x</sup></i>),
+     * (<i>e<sup>x</sup>&nbsp;&minus;&nbsp;e<sup>&minus;x</sup></i>)/(<i>e<sup>x</sup>&nbsp;+&nbsp;e<sup>&minus;x</sup></i>),
      * in other words, {@linkplain Math#sinh
      * sinh(<i>x</i>)}/{@linkplain Math#cosh cosh(<i>x</i>)}.  Note
      * that the absolute value of the exact tanh is always less than
@@ -2754,7 +2755,7 @@ public final class Math {
      * <li> If both arguments are zero, the result is positive zero.
      * </ul>
      *
-     * <p>The computed result must be within 1 ulp of the exact
+     * <p>The computed result must be within 1.5 ulps of the exact
      * result.  If one parameter is held constant, the results must be
      * semi-monotonic in the other parameter.
      *
@@ -2769,7 +2770,7 @@ public final class Math {
     }
 
     /**
-     * Returns <i>e</i><sup>x</sup>&nbsp;-1.  Note that for values of
+     * Returns <i>e</i><sup>x</sup>&nbsp;&minus;1.  Note that for values of
      * <i>x</i> near 0, the exact sum of
      * {@code expm1(x)}&nbsp;+&nbsp;1 is much closer to the true
      * result of <i>e</i><sup>x</sup> than {@code exp(x)}.
@@ -2798,7 +2799,7 @@ public final class Math {
      * returned.
      *
      * @param   x   the exponent to raise <i>e</i> to in the computation of
-     *              <i>e</i><sup>{@code x}</sup>&nbsp;-1.
+     *              <i>e</i><sup>{@code x}</sup>&nbsp;&minus;1.
      * @return  the value <i>e</i><sup>{@code x}</sup>&nbsp;-&nbsp;1.
      * @since 1.5
      */
@@ -3346,12 +3347,12 @@ public final class Math {
         if(scaleFactor < 0) {
             scaleFactor = Math.max(scaleFactor, -MAX_SCALE);
             scale_increment = -512;
-            exp_delta = twoToTheDoubleScaleDown;
+            exp_delta = 0x1p-512;
         }
         else {
             scaleFactor = Math.min(scaleFactor, MAX_SCALE);
             scale_increment = 512;
-            exp_delta = twoToTheDoubleScaleUp;
+            exp_delta = 0x1p512;
         }
 
         // Calculate (scaleFactor % +/-512), 512 = 2^9, using
@@ -3419,10 +3420,6 @@ public final class Math {
          */
         return (float)((double)f*powerOfTwoD(scaleFactor));
     }
-
-    // Constants used in scalb
-    static double twoToTheDoubleScaleUp = powerOfTwoD(512);
-    static double twoToTheDoubleScaleDown = powerOfTwoD(-512);
 
     /**
      * Returns a floating-point power of two in the normal range.

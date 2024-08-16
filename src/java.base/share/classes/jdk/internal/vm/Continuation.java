@@ -56,9 +56,23 @@ public class Continuation {
 
     /** Reason for pinning */
     public enum Pinned {
-        /** Native frame on stack */ NATIVE,
-        /** Monitor held */          MONITOR,
-        /** In critical section */   CRITICAL_SECTION }
+        NATIVE(2, "Native frame or <clinit> on stack"),
+        MONITOR(3, "Monitor held"),
+        CRITICAL_SECTION(4, "In critical section");
+
+        private final int reasonCode;
+        private final String reasonString;
+        Pinned(int reasonCode, String reasonString) {
+            this.reasonCode = reasonCode;
+            this.reasonString = reasonString;
+        }
+        public int reasonCode() {
+            return reasonCode;
+        }
+        public String reasonString() {
+            return reasonString;
+        }
+    }
 
     /** Preemption attempt result */
     public enum PreemptStatus {
@@ -296,10 +310,10 @@ public class Continuation {
     }
 
     @IntrinsicCandidate
-    private native static int doYield();
+    private static native int doYield();
 
     @IntrinsicCandidate
-    private native static void enterSpecial(Continuation c, boolean isContinue, boolean isVirtualThread);
+    private static native void enterSpecial(Continuation c, boolean isContinue, boolean isVirtualThread);
 
 
     @Hidden
@@ -353,8 +367,6 @@ public class Continuation {
 
     @Hidden
     private boolean yield0(ContinuationScope scope, Continuation child) {
-        preempted = false;
-
         if (scope != this.scope)
             this.yieldInfo = scope;
         int res = doYield();
@@ -448,7 +460,7 @@ public class Continuation {
         return res != 0;
     }
 
-    static private native int isPinned0(ContinuationScope scope);
+    private static native int isPinned0(ContinuationScope scope);
 
     private boolean fence() {
         U.storeFence(); // needed to prevent certain transformations by the compiler

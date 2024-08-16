@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2008, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2008, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -152,8 +152,14 @@ void LIR_Assembler::osr_entry() {
   int monitor_offset = (method()->max_locals() + 2 * (number_of_locks - 1)) * BytesPerWord;
   for (int i = 0; i < number_of_locks; i++) {
     int slot_offset = monitor_offset - (i * 2 * BytesPerWord);
-    __ ldr(R1, Address(OSR_buf, slot_offset + 0*BytesPerWord));
-    __ ldr(R2, Address(OSR_buf, slot_offset + 1*BytesPerWord));
+    if (slot_offset >= 4096 - BytesPerWord) {
+      __ add_slow(R2, OSR_buf, slot_offset);
+      __ ldr(R1, Address(R2, 0*BytesPerWord));
+      __ ldr(R2, Address(R2, 1*BytesPerWord));
+    } else {
+      __ ldr(R1, Address(OSR_buf, slot_offset + 0*BytesPerWord));
+      __ ldr(R2, Address(OSR_buf, slot_offset + 1*BytesPerWord));
+    }
     __ str(R1, frame_map()->address_for_monitor_lock(i));
     __ str(R2, frame_map()->address_for_monitor_object(i));
   }
@@ -161,10 +167,7 @@ void LIR_Assembler::osr_entry() {
 
 
 int LIR_Assembler::check_icache() {
-  Register receiver = LIR_Assembler::receiverOpr()->as_register();
-  int offset = __ offset();
-  __ inline_cache_check(receiver, Ricklass);
-  return offset;
+  return __ ic_check(CodeEntryAlignment);
 }
 
 void LIR_Assembler::clinit_barrier(ciMethod* method) {
@@ -971,7 +974,7 @@ void LIR_Assembler::emit_alloc_array(LIR_OpAllocArray* op) {
                       op->tmp1()->as_register(),
                       op->tmp2()->as_register(),
                       op->tmp3()->as_register(),
-                      arrayOopDesc::header_size(op->type()),
+                      arrayOopDesc::base_offset_in_bytes(op->type()),
                       type2aelembytes(op->type()),
                       op->klass()->as_register(),
                       *op->stub()->entry());
@@ -1385,7 +1388,6 @@ void LIR_Assembler::emit_compare_and_swap(LIR_OpCompareAndSwap* op) {
     __ mov(dest, 1, eq);
     __ mov(dest, 0, ne);
   } else if (op->code() == lir_cas_long) {
-    assert(VM_Version::supports_cx8(), "wrong machine");
     Register cmp_value_lo = op->cmp_value()->as_register_lo();
     Register cmp_value_hi = op->cmp_value()->as_register_hi();
     Register new_value_lo = op->new_value()->as_register_lo();
@@ -1951,7 +1953,7 @@ void LIR_Assembler::emit_static_call_stub() {
   __ relocate(static_stub_Relocation::spec(call_pc));
   // If not a single instruction, NativeMovConstReg::next_instruction_address()
   // must jump over the whole following ldr_literal.
-  // (See CompiledStaticCall::set_to_interpreted())
+  // (See CompiledDirectCall::set_to_interpreted())
 #ifdef ASSERT
   address ldr_site = __ pc();
 #endif
@@ -2431,7 +2433,7 @@ void LIR_Assembler::emit_lock(LIR_OpLock* op) {
   Register hdr = op->hdr_opr()->as_pointer_register();
   Register lock = op->lock_opr()->as_pointer_register();
 
-  if (UseHeavyMonitors) {
+  if (LockingMode == LM_MONITOR) {
     if (op->info() != nullptr) {
       add_debug_info_for_null_check_here(op->info());
       __ null_check(obj);
@@ -2641,8 +2643,8 @@ void LIR_Assembler::rt_call(LIR_Opr result, address dest, const LIR_OprList* arg
 
 
 void LIR_Assembler::volatile_move_op(LIR_Opr src, LIR_Opr dest, BasicType type, CodeEmitInfo* info) {
-  assert(src->is_double_cpu() && dest->is_address() ||
-         src->is_address() && dest->is_double_cpu(),
+  assert((src->is_double_cpu() && dest->is_address()) ||
+         (src->is_address() && dest->is_double_cpu()),
          "Simple move_op is called for all other cases");
 
   int null_check_offset;

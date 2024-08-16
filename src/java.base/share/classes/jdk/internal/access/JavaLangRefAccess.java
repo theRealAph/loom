@@ -50,11 +50,4 @@ public interface JavaLangRefAccess {
      * Invoked by Runtime.runFinalization()
      */
     void runFinalization();
-
-    /**
-     * Constructs a new NativeReferenceQueue.
-     *
-     * Invoked by MethodType.ConcurrentWeakInternSet
-     */
-    <T> ReferenceQueue<T> newNativeReferenceQueue();
 }

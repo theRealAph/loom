@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1999, 2024, Oracle and/or its affiliates. All rights reserved.
  * Copyright (c) 2014, 2021, Red Hat Inc. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
@@ -38,7 +38,6 @@
 #include "interpreter/interpreter.hpp"
 #include "memory/universe.hpp"
 #include "nativeInst_aarch64.hpp"
-#include "oops/compiledICHolder.hpp"
 #include "oops/oop.inline.hpp"
 #include "prims/jvmtiExport.hpp"
 #include "register_aarch64.hpp"
@@ -171,12 +170,18 @@ class StubFrame: public StackObj {
  private:
   StubAssembler* _sasm;
   bool _return_state;
+  bool _use_pop_on_epilogue;
+
+  StubFrame(StubAssembler* sasm, const char* name, bool must_gc_arguments,
+            return_state_t return_state, bool use_pop_on_epilogue);
 
  public:
-  StubFrame(StubAssembler* sasm, const char* name, bool must_gc_arguments, return_state_t return_state=requires_return);
-  void load_argument(int offset_in_words, Register reg);
-
+  StubFrame(StubAssembler* sasm, const char* name, bool must_gc_arguments, bool use_pop_on_epilogue);
+  StubFrame(StubAssembler* sasm, const char* name, bool must_gc_arguments, return_state_t return_state);
+  StubFrame(StubAssembler* sasm, const char* name, bool must_gc_arguments);
   ~StubFrame();
+
+  void load_argument(int offset_in_words, Register reg);
 };;
 
 void StubAssembler::prologue(const char* name, bool must_gc_arguments) {
@@ -184,18 +189,37 @@ void StubAssembler::prologue(const char* name, bool must_gc_arguments) {
   enter();
 }
 
-void StubAssembler::epilogue() {
-  leave();
+void StubAssembler::epilogue(bool use_pop) {
+  // Avoid using a leave instruction when this frame may
+  // have been frozen, since the current value of rfp
+  // restored from the stub would be invalid. We still
+  // must restore the rfp value saved on enter though.
+  if (use_pop) {
+    ldp(rfp, lr, Address(post(sp, 2 * wordSize)));
+  } else {
+    leave();
+  }
   ret(lr);
 }
 
 #define __ _sasm->
 
-StubFrame::StubFrame(StubAssembler* sasm, const char* name, bool must_gc_arguments, return_state_t return_state) {
-  _sasm = sasm;
-  _return_state = return_state;
+StubFrame::StubFrame(StubAssembler* sasm, const char* name, bool must_gc_arguments,
+                     return_state_t return_state, bool use_pop_on_epilogue)
+  : _sasm(sasm), _return_state(return_state), _use_pop_on_epilogue(use_pop_on_epilogue) {
   __ prologue(name, must_gc_arguments);
 }
+
+StubFrame::StubFrame(StubAssembler* sasm, const char* name, bool must_gc_arguments,
+                     bool use_pop_on_epilogue) :
+  StubFrame(sasm, name, must_gc_arguments, requires_return, use_pop_on_epilogue) {}
+
+StubFrame::StubFrame(StubAssembler* sasm, const char* name, bool must_gc_arguments,
+                     return_state_t return_state) :
+  StubFrame(sasm, name, must_gc_arguments, return_state, /*use_pop_on_epilogue*/false) {}
+
+StubFrame::StubFrame(StubAssembler* sasm, const char* name, bool must_gc_arguments) :
+  StubFrame(sasm, name, must_gc_arguments, requires_return, /*use_pop_on_epilogue*/false) {}
 
 // load parameters that were stored with LIR_Assembler::store_parameter
 // Note: offsets for store_parameter and load_argument must match
@@ -204,11 +228,7 @@ void StubFrame::load_argument(int offset_in_words, Register reg) {
 }
 
 StubFrame::~StubFrame() {
-  if (_return_state == requires_return) {
-    __ epilogue();
-  } else {
-    __ should_not_reach_here();
-  }
+  __ epilogue(_use_pop_on_epilogue);
 }
 
 #undef __
@@ -253,7 +273,7 @@ static OopMap* generate_oop_map(StubAssembler* sasm, bool save_fpu_registers) {
 
   for (int i = 0; i < FrameMap::nof_cpu_regs; i++) {
     Register r = as_Register(i);
-    if (i <= 18 && i != rscratch1->encoding() && i != rscratch2->encoding()) {
+    if (r == rthread || (i <= 18 && i != rscratch1->encoding() && i != rscratch2->encoding())) {
       int sp_offset = cpu_reg_save_offsets[i];
       oop_map->set_callee_saved(VMRegImpl::stack2reg(sp_offset),
                                 r->as_VMReg());
@@ -338,6 +358,15 @@ void Runtime1::initialize_pd() {
   }
 }
 
+// return: offset in 64-bit words.
+uint Runtime1::runtime_blob_current_thread_offset(frame f) {
+  CodeBlob* cb = f.cb();
+  assert(cb == Runtime1::blob_for(Runtime1::monitorenter_id) ||
+         cb == Runtime1::blob_for(Runtime1::monitorenter_nofpu_id), "must be");
+  assert(cb != nullptr && cb->is_runtime_stub(), "invalid frame");
+  int offset = cpu_reg_save_offsets[rthread->encoding()];
+  return offset / 2;   // SP offsets are in halfwords
+}
 
 // target: the entry point of the method that creates and posts the exception oop
 // has_argument: true if the exception needs arguments (passed in rscratch1 and rscratch2)
@@ -369,7 +398,7 @@ OopMapSet* Runtime1::generate_handle_exception(StubID id, StubAssembler *sasm) {
 
   // Save registers, if required.
   OopMapSet* oop_maps = new OopMapSet();
-  OopMap* oop_map = NULL;
+  OopMap* oop_map = nullptr;
   switch (id) {
   case forward_exception_id:
     // We're handling an exception in the context of a compiled frame.
@@ -385,7 +414,7 @@ OopMapSet* Runtime1::generate_handle_exception(StubID id, StubAssembler *sasm) {
 
     // load issuing PC (the return address for this stub) into r3
     __ ldr(exception_pc, Address(rfp, 1*BytesPerWord));
-    __ authenticate_return_address(exception_pc, rscratch1);
+    __ authenticate_return_address(exception_pc);
 
     // make sure that the vm_results are cleared (may be unnecessary)
     __ str(zr, Address(rthread, JavaThread::vm_result_offset()));
@@ -434,7 +463,7 @@ OopMapSet* Runtime1::generate_handle_exception(StubID id, StubAssembler *sasm) {
   __ str(exception_pc, Address(rthread, JavaThread::exception_pc_offset()));
 
   // patch throwing pc into return address (has bci & oop map)
-  __ protect_return_address(exception_pc, rscratch1);
+  __ protect_return_address(exception_pc);
   __ str(exception_pc, Address(rfp, 1*BytesPerWord));
 
   // compute the exception handler.
@@ -450,7 +479,7 @@ OopMapSet* Runtime1::generate_handle_exception(StubID id, StubAssembler *sasm) {
   __ invalidate_registers(false, true, true, true, true, true);
 
   // patch the return address, this stub will directly return to the exception handler
-  __ protect_return_address(r0, rscratch1);
+  __ protect_return_address(r0);
   __ str(r0, Address(rfp, 1*BytesPerWord));
 
   switch (id) {
@@ -477,6 +506,15 @@ void Runtime1::generate_unwind_exception(StubAssembler *sasm) {
   // other registers used in this stub
   const Register exception_pc = r3;
   const Register handler_addr = r1;
+
+  if (AbortVMOnException) {
+    __ mov(rscratch1, exception_oop);
+    __ enter();
+    save_live_registers(sasm);
+    __ call_VM_leaf(CAST_FROM_FN_PTR(address, check_abort_on_vm_exception), rscratch1);
+    restore_live_registers(sasm);
+    __ leave();
+  }
 
   // verify that only r0, is valid at this time
   __ invalidate_registers(false, true, true, true, true, true);
@@ -542,7 +580,7 @@ OopMapSet* Runtime1::generate_patching(StubAssembler* sasm, address target) {
   // Note: This number affects also the RT-Call in generate_handle_exception because
   //       the oop-map is shared for all calls.
   DeoptimizationBlob* deopt_blob = SharedRuntime::deopt_blob();
-  assert(deopt_blob != NULL, "deoptimization blob must have been created");
+  assert(deopt_blob != nullptr, "deoptimization blob must have been created");
 
   OopMap* oop_map = save_live_registers(sasm);
 
@@ -616,8 +654,8 @@ OopMapSet* Runtime1::generate_code_for(StubID id, StubAssembler* sasm) {
   bool save_fpu_registers = true;
 
   // stub code & info for the different stubs
-  OopMapSet* oop_maps = NULL;
-  OopMap* oop_map = NULL;
+  OopMapSet* oop_maps = nullptr;
+  OopMap* oop_map = nullptr;
   switch (id) {
     {
     case forward_exception_id:
@@ -834,7 +872,7 @@ OopMapSet* Runtime1::generate_code_for(StubID id, StubAssembler* sasm) {
         __ ldp(r4, r0, Address(sp, (sup_k_off) * VMRegImpl::stack_slot_size));
 
         Label miss;
-        __ check_klass_subtype_slow_path(r4, r0, r2, r5, NULL, &miss);
+        __ check_klass_subtype_slow_path(r4, r0, r2, r5, nullptr, &miss);
 
         // fallthrough on success:
         __ mov(rscratch1, 1);
@@ -854,7 +892,7 @@ OopMapSet* Runtime1::generate_code_for(StubID id, StubAssembler* sasm) {
       // fall through
     case monitorenter_id:
       {
-        StubFrame f(sasm, "monitorenter", dont_gc_arguments);
+        StubFrame f(sasm, "monitorenter", dont_gc_arguments, /*use_pop_on_epilogue*/true);
         OopMap* map = save_live_registers(sasm, save_fpu_registers);
 
         // Called with store_parameter and not C abi
@@ -904,7 +942,7 @@ OopMapSet* Runtime1::generate_code_for(StubID id, StubAssembler* sasm) {
         oop_maps->add_gc_map(call_offset, oop_map);
         restore_live_registers(sasm);
         DeoptimizationBlob* deopt_blob = SharedRuntime::deopt_blob();
-        assert(deopt_blob != NULL, "deoptimization blob must have been created");
+        assert(deopt_blob != nullptr, "deoptimization blob must have been created");
         __ leave();
         __ far_jump(RuntimeAddress(deopt_blob->unpack_with_reexecution()));
       }
@@ -991,7 +1029,7 @@ OopMapSet* Runtime1::generate_code_for(StubID id, StubAssembler* sasm) {
         restore_live_registers(sasm);
         __ leave();
         DeoptimizationBlob* deopt_blob = SharedRuntime::deopt_blob();
-        assert(deopt_blob != NULL, "deoptimization blob must have been created");
+        assert(deopt_blob != nullptr, "deoptimization blob must have been created");
 
         __ far_jump(RuntimeAddress(deopt_blob->unpack_with_reexecution()));
       }
@@ -1021,4 +1059,4 @@ OopMapSet* Runtime1::generate_code_for(StubID id, StubAssembler* sasm) {
 
 #undef __
 
-const char *Runtime1::pd_name_for_address(address entry) { Unimplemented(); return 0; }
+const char *Runtime1::pd_name_for_address(address entry) { Unimplemented(); }

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2022, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -24,21 +24,24 @@
  */
 package jdk.internal.classfile.impl;
 
-import jdk.internal.classfile.*;
-import jdk.internal.classfile.constantpool.Utf8Entry;
+import java.lang.constant.MethodTypeDesc;
+import java.lang.classfile.*;
+import java.lang.classfile.constantpool.Utf8Entry;
 
+import java.lang.reflect.AccessFlag;
 import java.util.List;
 import java.util.Optional;
 import java.util.function.Consumer;
 
 public final class MethodImpl
         extends AbstractElement
-        implements MethodModel, MethodInfo {
+        implements MethodModel, MethodInfo, Util.Writable {
 
     private final ClassReader reader;
     private final int startPos, endPos, attributesPos;
     private List<Attribute<?>> attributes;
     private int[] parameterSlots;
+    private MethodTypeDesc mDesc;
 
     public MethodImpl(ClassReader reader, int startPos, int endPos, int attrStart) {
         this.reader = reader;
@@ -49,7 +52,7 @@ public final class MethodImpl
 
     @Override
     public AccessFlags flags() {
-        return AccessFlags.ofMethod(reader.readU2(startPos));
+        return new AccessFlagsImpl(AccessFlag.Location.METHOD, reader.readU2(startPos));
     }
 
     @Override
@@ -62,12 +65,20 @@ public final class MethodImpl
 
     @Override
     public Utf8Entry methodName() {
-        return reader.readUtf8Entry(startPos + 2);
+        return reader.readEntry(startPos + 2, Utf8Entry.class);
     }
 
     @Override
     public Utf8Entry methodType() {
-        return reader.readUtf8Entry(startPos + 4);
+        return reader.readEntry(startPos + 4, Utf8Entry.class);
+    }
+
+    @Override
+    public MethodTypeDesc methodTypeSymbol() {
+        if (mDesc == null) {
+            mDesc = MethodTypeDesc.ofDescriptor(methodType().stringValue());
+        }
+        return mDesc;
     }
 
     @Override
@@ -78,7 +89,7 @@ public final class MethodImpl
     @Override
     public int parameterSlot(int paramNo) {
         if (parameterSlots == null)
-            parameterSlots = Util.parseParameterSlots(methodFlags(), methodType().stringValue());
+            parameterSlots = Util.parseParameterSlots(methodFlags(), methodTypeSymbol());
         return parameterSlots[paramNo];
     }
 
@@ -91,8 +102,7 @@ public final class MethodImpl
     }
 
     @Override
-    public void writeTo(BufWriter b) {
-        BufWriterImpl buf = (BufWriterImpl) b;
+    public void writeTo(BufWriterImpl buf) {
         if (buf.canWriteDirect(reader)) {
             reader.copyBytesTo(buf, startPos, endPos - startPos);
         }
@@ -100,7 +110,7 @@ public final class MethodImpl
             buf.writeU2(flags().flagsMask());
             buf.writeIndex(methodName());
             buf.writeIndex(methodType());
-            buf.writeList(attributes());
+            Util.writeAttributes(buf, attributes());
         }
     }
 
@@ -108,11 +118,11 @@ public final class MethodImpl
 
     @Override
     public Optional<CodeModel> code() {
-        return findAttribute(Attributes.CODE).map(a -> (CodeModel) a);
+        return findAttribute(Attributes.code()).map(a -> (CodeModel) a);
     }
 
     @Override
-    public void forEachElement(Consumer<MethodElement> consumer) {
+    public void forEach(Consumer<? super MethodElement> consumer) {
         consumer.accept(flags());
         for (Attribute<?> attr : attributes()) {
             if (attr instanceof MethodElement e)
@@ -130,7 +140,7 @@ public final class MethodImpl
                                new Consumer<>() {
                 @Override
                 public void accept(MethodBuilder mb) {
-                    MethodImpl.this.forEachElement(mb);
+                    MethodImpl.this.forEach(mb);
                 }
             });
         }

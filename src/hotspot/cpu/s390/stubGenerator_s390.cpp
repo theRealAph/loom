@@ -1,6 +1,6 @@
 /*
- * Copyright (c) 2016, 2023, Oracle and/or its affiliates. All rights reserved.
- * Copyright (c) 2016, 2023 SAP SE. All rights reserved.
+ * Copyright (c) 2016, 2024, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2016, 2024 SAP SE. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -37,6 +37,7 @@
 #include "oops/objArrayKlass.hpp"
 #include "oops/oop.inline.hpp"
 #include "prims/methodHandles.hpp"
+#include "prims/upcallLinker.hpp"
 #include "runtime/frame.inline.hpp"
 #include "runtime/handles.inline.hpp"
 #include "runtime/javaThread.hpp"
@@ -372,9 +373,9 @@ class StubGenerator: public StubCodeGenerator {
 #ifdef ASSERT
       char  assertMsg[] = "check BasicType definition in globalDefinitions.hpp";
       __ z_chi(r_arg_result_type, T_BOOLEAN);
-      __ asm_assert_low(assertMsg, 0x0234);
+      __ asm_assert(Assembler::bcondNotLow, assertMsg, 0x0234);
       __ z_chi(r_arg_result_type, T_NARROWOOP);
-      __ asm_assert_high(assertMsg, 0x0235);
+      __ asm_assert(Assembler::bcondNotHigh, assertMsg, 0x0235);
 #endif
       __ add2reg(r_arg_result_type, -T_BOOLEAN);          // Remove offset.
       __ z_larl(Z_R1, firstHandler);                      // location of first handler
@@ -483,7 +484,7 @@ class StubGenerator: public StubCodeGenerator {
     __ z_st(exception_line, thread_(exception_line));
 
     // Complete return to VM.
-    assert(StubRoutines::_call_stub_return_address != NULL, "must have been generated before");
+    assert(StubRoutines::_call_stub_return_address != nullptr, "must have been generated before");
 
     // Continue in call stub.
     __ z_br(Z_ARG2);
@@ -649,7 +650,7 @@ class StubGenerator: public StubCodeGenerator {
       RuntimeStub::new_runtime_stub(name, &code,
                                     frame_complete_pc - start,
                                     framesize_in_bytes/wordSize,
-                                    NULL /*oop_maps*/, false);
+                                    nullptr /*oop_maps*/, false);
 
     return stub->entry_point();
   }
@@ -685,12 +686,12 @@ class StubGenerator: public StubCodeGenerator {
     const Register Rarray_ptr  = Z_ARG5; // Current value from cache array.
 
     if (UseCompressedOops) {
-      assert(Universe::heap() != NULL, "java heap must be initialized to generate partial_subtype_check stub");
+      assert(Universe::heap() != nullptr, "java heap must be initialized to generate partial_subtype_check stub");
     }
 
     // Always take the slow path.
     __ check_klass_subtype_slow_path(Rsubklass, Rsuperklass,
-                                     Rarray_ptr, Rlength, NULL, &miss);
+                                     Rarray_ptr, Rlength, nullptr, &miss);
 
     // Match falls through here.
     __ clear_reg(Z_RET);               // Zero indicates a match. Set EQ flag in CC.
@@ -699,6 +700,50 @@ class StubGenerator: public StubCodeGenerator {
     __ BIND(miss);
     __ load_const_optimized(Z_RET, 1); // One indicates a miss.
     __ z_ltgr(Z_RET, Z_RET);           // Set NE flag in CR.
+    __ z_br(Z_R14);
+
+    return start;
+  }
+
+  address generate_lookup_secondary_supers_table_stub(u1 super_klass_index) {
+    StubCodeMark mark(this, "StubRoutines", "lookup_secondary_supers_table");
+
+    const Register
+        r_super_klass  = Z_ARG1,
+        r_sub_klass    = Z_ARG2,
+        r_array_index  = Z_ARG3,
+        r_array_length = Z_ARG4,
+        r_array_base   = Z_ARG5,
+        r_bitmap       = Z_R10,
+        r_result       = Z_R11;
+    address start = __ pc();
+
+    __ lookup_secondary_supers_table(r_sub_klass, r_super_klass,
+                                     r_array_base, r_array_length, r_array_index,
+                                     r_bitmap, r_result, super_klass_index);
+
+    __ z_br(Z_R14);
+
+    return start;
+  }
+
+  // Slow path implementation for UseSecondarySupersTable.
+  address generate_lookup_secondary_supers_table_slow_path_stub() {
+    StubCodeMark mark(this, "StubRoutines", "lookup_secondary_supers_table_slow_path");
+
+    address start = __ pc();
+
+    const Register
+        r_super_klass  = Z_ARG1,
+        r_array_base   = Z_ARG5,
+        r_temp1        = Z_ARG4,
+        r_array_index  = Z_ARG3,
+        r_bitmap       = Z_R10,
+        r_result       = Z_R11;
+
+    __ lookup_secondary_supers_table_slow_path(r_super_klass, r_array_base,
+                                               r_array_index, r_bitmap, r_result, r_temp1);
+
     __ z_br(Z_R14);
 
     return start;
@@ -740,7 +785,7 @@ class StubGenerator: public StubCodeGenerator {
   void assert_positive_int(Register count) {
 #ifdef ASSERT
     __ z_srag(Z_R0, count, 31);  // Just leave the sign (must be zero) in Z_R0.
-    __ asm_assert_eq("missing zero extend", 0xAFFE);
+    __ asm_assert(Assembler::bcondZero, "missing zero extend", 0xAFFE);
 #endif
   }
 
@@ -2980,7 +3025,6 @@ class StubGenerator: public StubCodeGenerator {
   //   Z_ARG3    - y address
   //   Z_ARG4    - y length
   //   Z_ARG5    - z address
-  //   160[Z_SP] - z length
   address generate_multiplyToLen() {
     __ align(CodeEntryAlignment);
     StubCodeMark mark(this, "StubRoutines", "multiplyToLen");
@@ -2992,8 +3036,6 @@ class StubGenerator: public StubCodeGenerator {
     const Register y    = Z_ARG3;
     const Register ylen = Z_ARG4;
     const Register z    = Z_ARG5;
-    // zlen is passed on the stack:
-    // Address zlen(Z_SP, _z_abi(remaining_cargs));
 
     // Next registers will be saved on stack in multiply_to_len().
     const Register tmp1 = Z_tmp_1;
@@ -3014,7 +3056,7 @@ class StubGenerator: public StubCodeGenerator {
     return start;
   }
 
-  address generate_nmethod_entry_barrier() {
+  address generate_method_entry_barrier() {
     __ align(CodeEntryAlignment);
     StubCodeMark mark(this, "StubRoutines", "nmethod_entry_barrier");
 
@@ -3085,7 +3127,29 @@ class StubGenerator: public StubCodeGenerator {
     Unimplemented();
     return nullptr;
   }
-  #endif // INCLUD_JFR
+
+  RuntimeStub* generate_jfr_return_lease() {
+    if (!Continuations::enabled()) return nullptr;
+    Unimplemented();
+    return nullptr;
+  }
+
+  #endif // INCLUDE_JFR
+
+  // exception handler for upcall stubs
+  address generate_upcall_stub_exception_handler() {
+    StubCodeMark mark(this, "StubRoutines", "upcall stub exception handler");
+    address start = __ pc();
+
+    // Native caller has no idea how to handle exceptions,
+    // so we just crash here. Up to callee to catch exceptions.
+    __ verify_oop(Z_ARG1);
+    __ load_const_optimized(Z_R1_scratch, CAST_FROM_FN_PTR(uint64_t, UpcallLinker::handle_uncaught_exception));
+    __ call_c(Z_R1_scratch);
+    __ should_not_reach_here();
+
+    return start;
+  }
 
   void generate_initial_stubs() {
     // Generates all stubs and initializes the entry points.
@@ -3133,9 +3197,17 @@ class StubGenerator: public StubCodeGenerator {
     StubRoutines::_cont_returnBarrier = generate_cont_returnBarrier();
     StubRoutines::_cont_returnBarrierExc = generate_cont_returnBarrier_exception();
 
-    JFR_ONLY(StubRoutines::_jfr_write_checkpoint_stub = generate_jfr_write_checkpoint();)
-    JFR_ONLY(StubRoutines::_jfr_write_checkpoint = StubRoutines::_jfr_write_checkpoint_stub->entry_point();)
+    JFR_ONLY(generate_jfr_stubs();)
   }
+
+#if INCLUDE_JFR
+  void generate_jfr_stubs() {
+    StubRoutines::_jfr_write_checkpoint_stub = generate_jfr_write_checkpoint();
+    StubRoutines::_jfr_write_checkpoint = StubRoutines::_jfr_write_checkpoint_stub->entry_point();
+    StubRoutines::_jfr_return_lease_stub = generate_jfr_return_lease();
+    StubRoutines::_jfr_return_lease = StubRoutines::_jfr_return_lease_stub->entry_point();
+  }
+#endif // INCLUDE_JFR
 
   void generate_final_stubs() {
     // Generates all stubs and initializes the entry points.
@@ -3155,10 +3227,11 @@ class StubGenerator: public StubCodeGenerator {
 
     // nmethod entry barriers for concurrent class unloading
     BarrierSetNMethod* bs_nm = BarrierSet::barrier_set()->barrier_set_nmethod();
-    if (bs_nm != NULL) {
-      StubRoutines::zarch::_nmethod_entry_barrier = generate_nmethod_entry_barrier();
+    if (bs_nm != nullptr) {
+      StubRoutines::_method_entry_barrier = generate_method_entry_barrier();
     }
 
+    StubRoutines::_upcall_stub_exception_handler = generate_upcall_stub_exception_handler();
   }
 
   void generate_compiler_stubs() {
@@ -3171,7 +3244,7 @@ class StubGenerator: public StubCodeGenerator {
         StubRoutines::_cipherBlockChaining_encryptAESCrypt = generate_cipherBlockChaining_AES_encrypt("AES_encryptBlock_chaining");
         StubRoutines::_cipherBlockChaining_decryptAESCrypt = generate_cipherBlockChaining_AES_decrypt("AES_decryptBlock_chaining");
       } else {
-        // In PRODUCT builds, the function pointers will keep their initial (NULL) value.
+        // In PRODUCT builds, the function pointers will keep their initial (null) value.
         // LibraryCallKit::try_to_inline() will return false then, preventing the intrinsic to be called.
         assert(VM_Version::has_Crypto_AES(), "Inconsistent settings. Check vm_version_s390.cpp");
       }
@@ -3181,7 +3254,7 @@ class StubGenerator: public StubCodeGenerator {
       if (VM_Version::has_Crypto_AES_CTR()) {
         StubRoutines::_counterMode_AESCrypt = generate_counterMode_AESCrypt("counterMode_AESCrypt");
       } else {
-        // In PRODUCT builds, the function pointers will keep their initial (NULL) value.
+        // In PRODUCT builds, the function pointers will keep their initial (null) value.
         // LibraryCallKit::try_to_inline() will return false then, preventing the intrinsic to be called.
         assert(VM_Version::has_Crypto_AES_CTR(), "Inconsistent settings. Check vm_version_s390.cpp");
       }
@@ -3217,6 +3290,14 @@ class StubGenerator: public StubCodeGenerator {
     if (UseMontgomerySquareIntrinsic) {
       StubRoutines::_montgomerySquare
         = CAST_FROM_FN_PTR(address, SharedRuntime::montgomery_square);
+    }
+    if (UseSecondarySupersTable) {
+      StubRoutines::_lookup_secondary_supers_table_slow_path_stub = generate_lookup_secondary_supers_table_slow_path_stub();
+      if (!InlineSecondarySupersTest) {
+        for (int slot = 0; slot < Klass::SECONDARY_SUPERS_TABLE_SIZE; slot++) {
+          StubRoutines::_lookup_secondary_supers_table_stubs[slot] = generate_lookup_secondary_supers_table_stub(slot);
+        }
+      }
     }
 #endif
 #endif // COMPILER2_OR_JVMCI

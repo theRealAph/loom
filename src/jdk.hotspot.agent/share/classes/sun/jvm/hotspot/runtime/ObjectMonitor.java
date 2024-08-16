@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001, 2021, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2001, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -44,17 +44,22 @@ public class ObjectMonitor extends VMObject {
   private static synchronized void initialize(TypeDataBase db) throws WrongTypeException {
     heap = VM.getVM().getObjectHeap();
     Type type  = db.lookupType("ObjectMonitor");
+
     sun.jvm.hotspot.types.Field f = type.getField("_header");
     headerFieldOffset = f.getOffset();
     f = type.getField("_object");
     objectFieldOffset = f.getOffset();
     f = type.getField("_owner");
     ownerFieldOffset = f.getOffset();
+    f = type.getField("_stack_locker");
+    stackLockerFieldOffset = f.getOffset();
     f = type.getField("_next_om");
     nextOMFieldOffset = f.getOffset();
     contentionsField  = new CIntField(type.getCIntegerField("_contentions"), 0);
     waitersField      = new CIntField(type.getCIntegerField("_waiters"), 0);
     recursionsField   = type.getCIntegerField("_recursions");
+
+    ANONYMOUS_OWNER = db.lookupLongConstant("ObjectMonitor::ANONYMOUS_OWNER").longValue();
   }
 
   public ObjectMonitor(Address addr) {
@@ -79,7 +84,12 @@ public class ObjectMonitor extends VMObject {
     return false;
   }
 
+  public boolean isOwnedAnonymous() {
+    return addr.getAddressAt(ownerFieldOffset).asLongValue() == ANONYMOUS_OWNER;
+  }
+
   public Address owner() { return addr.getAddressAt(ownerFieldOffset); }
+  public Address stackLocker() { return addr.getAddressAt(stackLockerFieldOffset); }
   // FIXME
   //  void      set_owner(void* owner);
 
@@ -110,9 +120,12 @@ public class ObjectMonitor extends VMObject {
   private static long          headerFieldOffset;
   private static long          objectFieldOffset;
   private static long          ownerFieldOffset;
+  private static long          stackLockerFieldOffset;
   private static long          nextOMFieldOffset;
   private static CIntField     contentionsField;
   private static CIntField     waitersField;
   private static CIntegerField recursionsField;
+  private static long          ANONYMOUS_OWNER;
+
   // FIXME: expose platform-dependent stuff
 }

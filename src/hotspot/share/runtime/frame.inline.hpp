@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -27,8 +27,9 @@
 
 #include "runtime/frame.hpp"
 
+#include "c1/c1_Runtime1.hpp"
 #include "code/codeBlob.inline.hpp"
-#include "code/compiledMethod.inline.hpp"
+#include "code/nmethod.inline.hpp"
 #include "interpreter/interpreter.hpp"
 #include "oops/stackChunkOop.inline.hpp"
 #include "oops/method.hpp"
@@ -64,11 +65,48 @@ inline bool frame::is_upcall_stub_frame() const {
 
 inline bool frame::is_compiled_frame() const {
   if (_cb != nullptr &&
-      _cb->is_compiled() &&
-      ((CompiledMethod*)_cb)->is_java_method()) {
+      _cb->is_nmethod() &&
+      _cb->as_nmethod()->is_java_method()) {
     return true;
   }
   return false;
+}
+
+inline address frame::get_deopt_original_pc() const {
+  if (_cb == nullptr)  return nullptr;
+
+  nmethod* nm = _cb->as_nmethod_or_null();
+  if (nm != nullptr && nm->is_deopt_pc(_pc)) {
+    return nm->get_original_pc(this);
+  }
+  return nullptr;
+}
+
+#ifdef ASSERT
+static address get_register_address_in_stub(const frame& stub_fr, VMReg reg) {
+  RegisterMap map(nullptr,
+                  RegisterMap::UpdateMap::include,
+                  RegisterMap::ProcessFrames::skip,
+                  RegisterMap::WalkContinuation::skip);
+  stub_fr.oop_map()->update_register_map(&stub_fr, &map);
+  return map.location(reg, stub_fr.sp());
+}
+#endif
+
+inline JavaThread** frame::saved_thread_address(const frame& f) {
+  CodeBlob* cb = f.cb();
+  assert(cb != nullptr && cb->is_runtime_stub(), "invalid frame");
+
+  JavaThread** thread_addr;
+  if (cb == Runtime1::blob_for(Runtime1::monitorenter_id) ||
+      cb == Runtime1::blob_for(Runtime1::monitorenter_nofpu_id)) {
+    thread_addr = (JavaThread**)(f.sp() + Runtime1::runtime_blob_current_thread_offset(f));
+  } else {
+    // c2 only saves rbp in the stub frame so nothing to do.
+    thread_addr = nullptr;
+  }
+  assert(get_register_address_in_stub(f, SharedRuntime::thread_register()) == (address)thread_addr, "wrong thread address");
+  return thread_addr;
 }
 
 template <typename RegisterMapT>
@@ -102,6 +140,24 @@ inline CodeBlob* frame::get_cb() const {
     }
   }
   return _cb;
+}
+
+inline const ImmutableOopMap* frame::get_oop_map() const {
+  if (_cb == nullptr || _cb->oop_maps() == nullptr) return nullptr;
+
+  NativePostCallNop* nop = nativePostCallNop_at(_pc);
+  int oopmap_slot;
+  int cb_offset;
+  if (nop != nullptr && nop->decode(oopmap_slot, cb_offset)) {
+    return _cb->oop_map_for_slot(oopmap_slot, _pc);
+  }
+  const ImmutableOopMap* oop_map = OopMapSet::find_map(this);
+  return oop_map;
+}
+
+inline int frame::interpreter_frame_monitor_size_in_bytes() {
+  // Number of bytes for a monitor.
+  return frame::interpreter_frame_monitor_size() * wordSize;
 }
 
 #endif // SHARE_RUNTIME_FRAME_INLINE_HPP

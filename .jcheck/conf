@@ -2,7 +2,7 @@
 project=loom
 repository=loom
 jbs=JDK
-version=21
+version=24
 
 [checks]
 error=author,committer,whitespace
@@ -12,5 +12,5 @@ version=0
 domain=openjdk.org
 
 [checks "whitespace"]
-files=.*\.cpp|.*\.hpp|.*\.c|.*\.h|.*\.java|.*\.cc|.*\.hh|.*\.m|.*\.mm|.*\.md|.*\.gmk|.*\.m4|.*\.ac|Makefile
+files=.*\.cpp|.*\.hpp|.*\.c|.*\.h|.*\.java|.*\.cc|.*\.hh|.*\.m|.*\.mm|.*\.S|.*\.md|.*\.properties|.*\.gmk|.*\.m4|.*\.ac|Makefile
 ignore-tabs=.*\.gmk|Makefile

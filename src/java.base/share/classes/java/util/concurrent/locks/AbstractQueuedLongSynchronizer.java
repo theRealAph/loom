@@ -369,14 +369,19 @@ public abstract class AbstractQueuedLongSynchronizer
             } else if (node.status == 0) {
                 node.status = WAITING;          // enable signal and recheck
             } else {
-                long nanos;
                 spins = postSpins = (byte)((postSpins << 1) | 1);
-                if (!timed)
-                    LockSupport.park(this);
-                else if ((nanos = time - System.nanoTime()) > 0L)
-                    LockSupport.parkNanos(this, nanos);
-                else
-                    break;
+                try {
+                    long nanos;
+                    if (!timed)
+                        LockSupport.park(this);
+                    else if ((nanos = time - System.nanoTime()) > 0L)
+                        LockSupport.parkNanos(this, nanos);
+                    else
+                        break;
+                } catch (Error | RuntimeException ex) {
+                    cancelAcquire(node, interrupted, interruptible); // cancel & rethrow
+                    throw ex;
+                }
                 node.clearStatus();
                 if ((interrupted |= Thread.interrupted()) && interruptible)
                     break;
@@ -1127,13 +1132,18 @@ public abstract class AbstractQueuedLongSynchronizer
         private void doSignal(ConditionNode first, boolean all) {
             while (first != null) {
                 ConditionNode next = first.nextWaiter;
+
                 if ((firstWaiter = next) == null)
                     lastWaiter = null;
+                else
+                    first.nextWaiter = null; // GC assistance
+
                 if ((first.getAndUnsetStatus(COND) & COND) != 0) {
                     enqueue(first);
                     if (!all)
                         break;
                 }
+
                 first = next;
             }
         }

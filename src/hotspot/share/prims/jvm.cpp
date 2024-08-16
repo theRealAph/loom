@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -23,6 +23,7 @@
  */
 
 #include "precompiled.hpp"
+#include "cds/cdsConfig.hpp"
 #include "cds/classListParser.hpp"
 #include "cds/classListWriter.hpp"
 #include "cds/dynamicArchive.hpp"
@@ -63,6 +64,7 @@
 #include "oops/objArrayKlass.hpp"
 #include "oops/objArrayOop.inline.hpp"
 #include "oops/oop.inline.hpp"
+#include "prims/foreignGlobals.hpp"
 #include "prims/jvm_misc.hpp"
 #include "prims/jvmtiExport.hpp"
 #include "prims/jvmtiThreadState.inline.hpp"
@@ -94,12 +96,14 @@
 #include "services/attachListener.hpp"
 #include "services/management.hpp"
 #include "services/threadService.hpp"
+#include "utilities/checkedCast.hpp"
 #include "utilities/copy.hpp"
 #include "utilities/defaultStream.hpp"
 #include "utilities/dtrace.hpp"
 #include "utilities/events.hpp"
 #include "utilities/macros.hpp"
 #include "utilities/utf8.hpp"
+#include "utilities/zipLibrary.hpp"
 #if INCLUDE_CDS
 #include "classfile/systemDictionaryShared.hpp"
 #endif
@@ -108,6 +112,9 @@
 #endif
 #if INCLUDE_MANAGEMENT
 #include "services/finalizerService.hpp"
+#endif
+#ifdef LINUX
+#include "osContainer_linux.hpp"
 #endif
 
 #include <errno.h>
@@ -492,6 +499,15 @@ JVM_LEAF(jboolean, JVM_IsUseContainerSupport(void))
   return JNI_FALSE;
 JVM_END
 
+JVM_LEAF(jboolean, JVM_IsContainerized(void))
+#ifdef LINUX
+  if (OSContainer::is_containerized()) {
+    return JNI_TRUE;
+  }
+#endif
+  return JNI_FALSE;
+JVM_END
+
 // java.lang.Throwable //////////////////////////////////////////////////////
 
 JVM_ENTRY(void, JVM_FillInStackTrace(JNIEnv *env, jobject receiver))
@@ -540,16 +556,30 @@ JVM_END
 JVM_ENTRY(void, JVM_InitStackTraceElement(JNIEnv* env, jobject element, jobject stackFrameInfo))
   Handle stack_frame_info(THREAD, JNIHandles::resolve_non_null(stackFrameInfo));
   Handle stack_trace_element(THREAD, JNIHandles::resolve_non_null(element));
-  java_lang_StackFrameInfo::to_stack_trace_element(stack_frame_info, stack_trace_element, THREAD);
+  java_lang_StackFrameInfo::to_stack_trace_element(stack_frame_info, stack_trace_element, CHECK);
 JVM_END
 
 
 // java.lang.StackWalker //////////////////////////////////////////////////////
+JVM_ENTRY(void, JVM_ExpandStackFrameInfo(JNIEnv *env, jobject obj))
+  Handle stack_frame_info(THREAD, JNIHandles::resolve_non_null(obj));
 
+  bool have_name = (java_lang_StackFrameInfo::name(stack_frame_info()) != nullptr);
+  bool have_type = (java_lang_StackFrameInfo::type(stack_frame_info()) != nullptr);
+  Method* method = java_lang_StackFrameInfo::get_method(stack_frame_info());
+  if (!have_name) {
+    oop name = StringTable::intern(method->name(), CHECK);
+    java_lang_StackFrameInfo::set_name(stack_frame_info(), name);
+  }
+  if (!have_type) {
+    Handle type = java_lang_String::create_from_symbol(method->signature(), CHECK);
+    java_lang_StackFrameInfo::set_type(stack_frame_info(), type());
+  }
+JVM_END
 
-JVM_ENTRY(jobject, JVM_CallStackWalk(JNIEnv *env, jobject stackStream, jlong mode,
+JVM_ENTRY(jobject, JVM_CallStackWalk(JNIEnv *env, jobject stackStream, jint mode,
                                      jint skip_frames, jobject contScope, jobject cont,
-                                     jint frame_count, jint start_index, jobjectArray frames))
+                                     jint buffer_size, jint start_index, jobjectArray frames))
   if (!thread->has_last_Java_frame()) {
     THROW_MSG_(vmSymbols::java_lang_InternalError(), "doStackWalk: no stack trace", nullptr);
   }
@@ -557,39 +587,37 @@ JVM_ENTRY(jobject, JVM_CallStackWalk(JNIEnv *env, jobject stackStream, jlong mod
   Handle stackStream_h(THREAD, JNIHandles::resolve_non_null(stackStream));
   Handle contScope_h(THREAD, JNIHandles::resolve(contScope));
   Handle cont_h(THREAD, JNIHandles::resolve(cont));
-  // frames array is a Class<?>[] array when only getting caller reference,
+  // frames array is a ClassFrameInfo[] array when only getting caller reference,
   // and a StackFrameInfo[] array (or derivative) otherwise. It should never
   // be null.
   objArrayOop fa = objArrayOop(JNIHandles::resolve_non_null(frames));
   objArrayHandle frames_array_h(THREAD, fa);
 
-  int limit = start_index + frame_count;
-  if (frames_array_h->length() < limit) {
+  if (frames_array_h->length() < buffer_size) {
     THROW_MSG_(vmSymbols::java_lang_IllegalArgumentException(), "not enough space in buffers", nullptr);
   }
 
   oop result = StackWalk::walk(stackStream_h, mode, skip_frames, contScope_h, cont_h,
-                               frame_count, start_index, frames_array_h, CHECK_NULL);
+                               buffer_size, start_index, frames_array_h, CHECK_NULL);
   return JNIHandles::make_local(THREAD, result);
 JVM_END
 
 
-JVM_ENTRY(jint, JVM_MoreStackWalk(JNIEnv *env, jobject stackStream, jlong mode, jlong anchor,
-                                  jint frame_count, jint start_index,
+JVM_ENTRY(jint, JVM_MoreStackWalk(JNIEnv *env, jobject stackStream, jint mode, jlong anchor,
+                                  jint last_batch_count, jint buffer_size, jint start_index,
                                   jobjectArray frames))
-  // frames array is a Class<?>[] array when only getting caller reference,
+  // frames array is a ClassFrameInfo[] array when only getting caller reference,
   // and a StackFrameInfo[] array (or derivative) otherwise. It should never
   // be null.
   objArrayOop fa = objArrayOop(JNIHandles::resolve_non_null(frames));
   objArrayHandle frames_array_h(THREAD, fa);
 
-  int limit = start_index+frame_count;
-  if (frames_array_h->length() < limit) {
+  if (frames_array_h->length() < buffer_size) {
     THROW_MSG_0(vmSymbols::java_lang_IllegalArgumentException(), "not enough space in buffers");
   }
 
   Handle stackStream_h(THREAD, JNIHandles::resolve_non_null(stackStream));
-  return StackWalk::fetchNextBatch(stackStream_h, mode, anchor, frame_count,
+  return StackWalk::fetchNextBatch(stackStream_h, mode, anchor, last_batch_count, buffer_size,
                                   start_index, frames_array_h, THREAD);
 JVM_END
 
@@ -607,7 +635,8 @@ JVM_END
 
 JVM_ENTRY(jint, JVM_IHashCode(JNIEnv* env, jobject handle))
   // as implemented in the classic virtual machine; return 0 if object is null
-  return handle == nullptr ? 0 : ObjectSynchronizer::FastHashCode (THREAD, JNIHandles::resolve_non_null(handle)) ;
+  return handle == nullptr ? 0 :
+         checked_cast<jint>(ObjectSynchronizer::FastHashCode (THREAD, JNIHandles::resolve_non_null(handle)));
 JVM_END
 
 
@@ -662,7 +691,7 @@ JVM_ENTRY(jobject, JVM_Clone(JNIEnv* env, jobject handle))
       (klass->is_instance_klass() &&
        InstanceKlass::cast(klass)->reference_type() != REF_NONE)) {
     ResourceMark rm(THREAD);
-    THROW_MSG_0(vmSymbols::java_lang_CloneNotSupportedException(), klass->external_name());
+    THROW_MSG_NULL(vmSymbols::java_lang_CloneNotSupportedException(), klass->external_name());
   }
 
   // Make shallow object copy
@@ -721,7 +750,7 @@ JVM_ENTRY(jclass, JVM_GetCallerClass(JNIEnv* env))
   //
   // The call stack at this point looks something like this:
   //
-  // [0] [ @CallerSensitive public sun.reflect.Reflection.getCallerClass ]
+  // [0] [ @CallerSensitive public jdk.internal.reflect.Reflection.getCallerClass ]
   // [1] [ @CallerSensitive API.method                                   ]
   // [.] [ (skipped intermediate frames)                                 ]
   // [n] [ caller                                                        ]
@@ -762,7 +791,7 @@ JVM_ENTRY(jclass, JVM_FindPrimitiveClass(JNIEnv* env, const char* utf))
     mirror = Universe::java_mirror(t);
   }
   if (mirror == nullptr) {
-    THROW_MSG_0(vmSymbols::java_lang_ClassNotFoundException(), (char*) utf);
+    THROW_MSG_NULL(vmSymbols::java_lang_ClassNotFoundException(), (char*) utf);
   } else {
     return (jclass) JNIHandles::make_local(THREAD, mirror);
   }
@@ -923,7 +952,7 @@ static jclass jvm_lookup_define_class(jclass lookup, const char *name,
   Klass* lookup_k = java_lang_Class::as_Klass(JNIHandles::resolve_non_null(lookup));
   // Lookup class must be a non-null instance
   if (lookup_k == nullptr) {
-    THROW_MSG_0(vmSymbols::java_lang_IllegalArgumentException(), "Lookup class is null");
+    THROW_MSG_NULL(vmSymbols::java_lang_IllegalArgumentException(), "Lookup class is null");
   }
   assert(lookup_k->is_instance_klass(), "Lookup class must be an instance klass");
 
@@ -950,20 +979,20 @@ static jclass jvm_lookup_define_class(jclass lookup, const char *name,
   if (!is_hidden) {
     // classData is only applicable for hidden classes
     if (classData != nullptr) {
-      THROW_MSG_0(vmSymbols::java_lang_IllegalArgumentException(), "classData is only applicable for hidden classes");
+      THROW_MSG_NULL(vmSymbols::java_lang_IllegalArgumentException(), "classData is only applicable for hidden classes");
     }
     if (is_nestmate) {
-      THROW_MSG_0(vmSymbols::java_lang_IllegalArgumentException(), "dynamic nestmate is only applicable for hidden classes");
+      THROW_MSG_NULL(vmSymbols::java_lang_IllegalArgumentException(), "dynamic nestmate is only applicable for hidden classes");
     }
     if (!is_strong) {
-      THROW_MSG_0(vmSymbols::java_lang_IllegalArgumentException(), "an ordinary class must be strongly referenced by its defining loader");
+      THROW_MSG_NULL(vmSymbols::java_lang_IllegalArgumentException(), "an ordinary class must be strongly referenced by its defining loader");
     }
     if (vm_annotations) {
-      THROW_MSG_0(vmSymbols::java_lang_IllegalArgumentException(), "vm annotations only allowed for hidden classes");
+      THROW_MSG_NULL(vmSymbols::java_lang_IllegalArgumentException(), "vm annotations only allowed for hidden classes");
     }
     if (flags != STRONG_LOADER_LINK) {
-      THROW_MSG_0(vmSymbols::java_lang_IllegalArgumentException(),
-                  err_msg("invalid flag 0x%x", flags));
+      THROW_MSG_NULL(vmSymbols::java_lang_IllegalArgumentException(),
+                     err_msg("invalid flag 0x%x", flags));
     }
   }
 
@@ -1003,7 +1032,7 @@ static jclass jvm_lookup_define_class(jclass lookup, const char *name,
     // The hidden class loader data has been artificially been kept alive to
     // this point. The mirror and any instances of this class have to keep
     // it alive afterwards.
-    ik->class_loader_data()->dec_keep_alive();
+    ik->class_loader_data()->dec_keep_alive_ref_count();
 
     if (is_nestmate && log_is_enabled(Debug, class, nestmates)) {
       ModuleEntry* module = ik->module();
@@ -1015,8 +1044,11 @@ static jclass jvm_lookup_define_class(jclass lookup, const char *name,
                                   ik->is_hidden() ? "is hidden" : "is not hidden");
     }
   }
-  assert(Reflection::is_same_class_package(lookup_k, ik),
-         "lookup class and defined class are in different packages");
+
+  if ((!is_hidden || is_nestmate) && !Reflection::is_same_class_package(lookup_k, ik)) {
+    // non-hidden class or nestmate class must be in the same package as the Lookup class
+    THROW_MSG_NULL(vmSymbols::java_lang_IllegalArgumentException(), "Lookup class and defined class are in different packages");
+  }
 
   if (init) {
     ik->initialize(CHECK_NULL);
@@ -1046,7 +1078,7 @@ JVM_ENTRY(jclass, JVM_LookupDefineClass(JNIEnv *env, jclass lookup, const char *
           jsize len, jobject pd, jboolean initialize, int flags, jobject classData))
 
   if (lookup == nullptr) {
-    THROW_MSG_0(vmSymbols::java_lang_IllegalArgumentException(), "Lookup class is null");
+    THROW_MSG_NULL(vmSymbols::java_lang_IllegalArgumentException(), "Lookup class is null");
   }
 
   assert(buf != nullptr, "buf must not be null");
@@ -1220,45 +1252,6 @@ JVM_ENTRY(jboolean, JVM_IsHiddenClass(JNIEnv *env, jclass cls))
   return k->is_hidden();
 JVM_END
 
-JVM_ENTRY(jobjectArray, JVM_GetClassSigners(JNIEnv *env, jclass cls))
-  JvmtiVMObjectAllocEventCollector oam;
-  oop mirror = JNIHandles::resolve_non_null(cls);
-  if (java_lang_Class::is_primitive(mirror)) {
-    // There are no signers for primitive types
-    return nullptr;
-  }
-
-  objArrayHandle signers(THREAD, java_lang_Class::signers(mirror));
-
-  // If there are no signers set in the class, or if the class
-  // is an array, return null.
-  if (signers == nullptr) return nullptr;
-
-  // copy of the signers array
-  Klass* element = ObjArrayKlass::cast(signers->klass())->element_klass();
-  objArrayOop signers_copy = oopFactory::new_objArray(element, signers->length(), CHECK_NULL);
-  for (int index = 0; index < signers->length(); index++) {
-    signers_copy->obj_at_put(index, signers->obj_at(index));
-  }
-
-  // return the copy
-  return (jobjectArray) JNIHandles::make_local(THREAD, signers_copy);
-JVM_END
-
-
-JVM_ENTRY(void, JVM_SetClassSigners(JNIEnv *env, jclass cls, jobjectArray signers))
-  oop mirror = JNIHandles::resolve_non_null(cls);
-  if (!java_lang_Class::is_primitive(mirror)) {
-    // This call is ignored for primitive types and arrays.
-    // Signers are only set once, ClassLoader.java, and thus shouldn't
-    // be called with an array.  Only the bootstrap loader creates arrays.
-    Klass* k = java_lang_Class::as_Klass(mirror);
-    if (k->is_instance_klass()) {
-      java_lang_Class::set_signers(k->java_mirror(), objArrayOop(JNIHandles::resolve(signers)));
-    }
-  }
-JVM_END
-
 
 JVM_ENTRY(jobject, JVM_GetProtectionDomain(JNIEnv *env, jclass cls))
   oop mirror = JNIHandles::resolve_non_null(cls);
@@ -1384,9 +1377,8 @@ JVM_ENTRY(jobject, JVM_FindScopedValueBindings(JNIEnv *env, jclass cls))
 
     InstanceKlass* holder = method->method_holder();
     if (name == vmSymbols::runWith_method_name()) {
-      if ((holder == resolver.Carrier_klass
-           || holder == vmClasses::VirtualThread_klass()
-           || holder == vmClasses::Thread_klass())) {
+      if (holder == vmClasses::Thread_klass()
+          || holder == resolver.Carrier_klass) {
         loc = 1;
       }
     }
@@ -1589,7 +1581,7 @@ static bool jvm_get_field_common(jobject field, fieldDescriptor& fd) {
   int modifiers = java_lang_reflect_Field::modifiers(reflected);
 
   InstanceKlass* ik = InstanceKlass::cast(k);
-  intptr_t offset = ik->field_offset(slot);
+  int offset = ik->field_offset(slot);
 
   if (modifiers & JVM_ACC_STATIC) {
     // for static fields we only look in the current class
@@ -1711,8 +1703,8 @@ JVM_ENTRY(jobjectArray, JVM_GetMethodParameters(JNIEnv *env, jobject method))
       bounds_check(cp, index, CHECK_NULL);
 
       if (0 != index && !mh->constants()->tag_at(index).is_utf8()) {
-        THROW_MSG_0(vmSymbols::java_lang_IllegalArgumentException(),
-                    "Wrong type at constant pool index");
+        THROW_MSG_NULL(vmSymbols::java_lang_IllegalArgumentException(),
+                       "Wrong type at constant pool index");
       }
 
     }
@@ -2141,7 +2133,7 @@ JVM_ENTRY(jclass, JVM_ConstantPoolGetClassAt(JNIEnv *env, jobject obj, jobject u
   bounds_check(cp, index, CHECK_NULL);
   constantTag tag = cp->tag_at(index);
   if (!tag.is_klass() && !tag.is_unresolved_klass()) {
-    THROW_MSG_0(vmSymbols::java_lang_IllegalArgumentException(), "Wrong type at constant pool index");
+    THROW_MSG_NULL(vmSymbols::java_lang_IllegalArgumentException(), "Wrong type at constant pool index");
   }
   Klass* k = cp->klass_at(index, CHECK_NULL);
   return (jclass) JNIHandles::make_local(THREAD, k->java_mirror());
@@ -2154,7 +2146,7 @@ JVM_ENTRY(jclass, JVM_ConstantPoolGetClassAtIfLoaded(JNIEnv *env, jobject obj, j
   bounds_check(cp, index, CHECK_NULL);
   constantTag tag = cp->tag_at(index);
   if (!tag.is_klass() && !tag.is_unresolved_klass()) {
-    THROW_MSG_0(vmSymbols::java_lang_IllegalArgumentException(), "Wrong type at constant pool index");
+    THROW_MSG_NULL(vmSymbols::java_lang_IllegalArgumentException(), "Wrong type at constant pool index");
   }
   Klass* k = ConstantPool::klass_at_if_loaded(cp, index);
   if (k == nullptr) return nullptr;
@@ -2165,7 +2157,7 @@ JVM_END
 static jobject get_method_at_helper(const constantPoolHandle& cp, jint index, bool force_resolution, TRAPS) {
   constantTag tag = cp->tag_at(index);
   if (!tag.is_method() && !tag.is_interface_method()) {
-    THROW_MSG_0(vmSymbols::java_lang_IllegalArgumentException(), "Wrong type at constant pool index");
+    THROW_MSG_NULL(vmSymbols::java_lang_IllegalArgumentException(), "Wrong type at constant pool index");
   }
   int klass_ref  = cp->uncached_klass_ref_index_at(index);
   Klass* k_o;
@@ -2180,7 +2172,7 @@ static jobject get_method_at_helper(const constantPoolHandle& cp, jint index, bo
   Symbol* sig  = cp->uncached_signature_ref_at(index);
   methodHandle m (THREAD, k->find_method(name, sig));
   if (m.is_null()) {
-    THROW_MSG_0(vmSymbols::java_lang_RuntimeException(), "Unable to look up method in target class");
+    THROW_MSG_NULL(vmSymbols::java_lang_RuntimeException(), "Unable to look up method in target class");
   }
   oop method;
   if (!m->is_initializer() || m->is_static()) {
@@ -2214,7 +2206,7 @@ JVM_END
 static jobject get_field_at_helper(constantPoolHandle cp, jint index, bool force_resolution, TRAPS) {
   constantTag tag = cp->tag_at(index);
   if (!tag.is_field()) {
-    THROW_MSG_0(vmSymbols::java_lang_IllegalArgumentException(), "Wrong type at constant pool index");
+    THROW_MSG_NULL(vmSymbols::java_lang_IllegalArgumentException(), "Wrong type at constant pool index");
   }
   int klass_ref  = cp->uncached_klass_ref_index_at(index);
   Klass* k_o;
@@ -2230,7 +2222,7 @@ static jobject get_field_at_helper(constantPoolHandle cp, jint index, bool force
   fieldDescriptor fd;
   Klass* target_klass = k->find_field(name, sig, &fd);
   if (target_klass == nullptr) {
-    THROW_MSG_0(vmSymbols::java_lang_RuntimeException(), "Unable to look up field in target class");
+    THROW_MSG_NULL(vmSymbols::java_lang_RuntimeException(), "Unable to look up field in target class");
   }
   oop field = Reflection::new_field(&fd, CHECK_NULL);
   return JNIHandles::make_local(THREAD, field);
@@ -2263,7 +2255,7 @@ JVM_ENTRY(jobjectArray, JVM_ConstantPoolGetMemberRefInfoAt(JNIEnv *env, jobject 
   bounds_check(cp, index, CHECK_NULL);
   constantTag tag = cp->tag_at(index);
   if (!tag.is_field_or_method()) {
-    THROW_MSG_0(vmSymbols::java_lang_IllegalArgumentException(), "Wrong type at constant pool index");
+    THROW_MSG_NULL(vmSymbols::java_lang_IllegalArgumentException(), "Wrong type at constant pool index");
   }
   int klass_ref = cp->uncached_klass_ref_index_at(index);
   Symbol*  klass_name  = cp->klass_name_at(klass_ref);
@@ -2314,7 +2306,7 @@ JVM_ENTRY(jobjectArray, JVM_ConstantPoolGetNameAndTypeRefInfoAt(JNIEnv *env, job
   bounds_check(cp, index, CHECK_NULL);
   constantTag tag = cp->tag_at(index);
   if (!tag.is_name_and_type()) {
-    THROW_MSG_0(vmSymbols::java_lang_IllegalArgumentException(), "Wrong type at constant pool index");
+    THROW_MSG_NULL(vmSymbols::java_lang_IllegalArgumentException(), "Wrong type at constant pool index");
   }
   Symbol* member_name = cp->symbol_at(cp->name_ref_index_at(index));
   Symbol* member_sig = cp->symbol_at(cp->signature_ref_index_at(index));
@@ -2382,7 +2374,7 @@ JVM_ENTRY(jstring, JVM_ConstantPoolGetStringAt(JNIEnv *env, jobject obj, jobject
   bounds_check(cp, index, CHECK_NULL);
   constantTag tag = cp->tag_at(index);
   if (!tag.is_string()) {
-    THROW_MSG_0(vmSymbols::java_lang_IllegalArgumentException(), "Wrong type at constant pool index");
+    THROW_MSG_NULL(vmSymbols::java_lang_IllegalArgumentException(), "Wrong type at constant pool index");
   }
   oop str = cp->string_at(index, CHECK_NULL);
   return (jstring) JNIHandles::make_local(THREAD, str);
@@ -2396,7 +2388,7 @@ JVM_ENTRY(jstring, JVM_ConstantPoolGetUTF8At(JNIEnv *env, jobject obj, jobject u
   bounds_check(cp, index, CHECK_NULL);
   constantTag tag = cp->tag_at(index);
   if (!tag.is_symbol()) {
-    THROW_MSG_0(vmSymbols::java_lang_IllegalArgumentException(), "Wrong type at constant pool index");
+    THROW_MSG_NULL(vmSymbols::java_lang_IllegalArgumentException(), "Wrong type at constant pool index");
   }
   Symbol* sym = cp->symbol_at(index);
   Handle str = java_lang_String::create_from_symbol(sym, CHECK_NULL);
@@ -2896,7 +2888,7 @@ void jio_print(const char* s, size_t len) {
     jio_fprintf(defaultStream::output_stream(), "%.*s", (int)len, s);
   } else {
     // Make an unused local variable to avoid warning from gcc compiler.
-    ssize_t count = os::write(defaultStream::output_fd(), s, (int)len);
+    bool dummy = os::write(defaultStream::output_fd(), s, len);
   }
 }
 
@@ -2926,7 +2918,7 @@ static void thread_entry(JavaThread* thread, TRAPS) {
 
 JVM_ENTRY(void, JVM_StartThread(JNIEnv* env, jobject jthread))
 #if INCLUDE_CDS
-  if (DumpSharedSpaces) {
+  if (CDSConfig::is_dumping_static_archive()) {
     // During java -Xshare:dump, if we allow multiple Java threads to
     // execute in parallel, symbols and classes may be loaded in
     // random orders which will make the resulting CDS archive
@@ -3043,9 +3035,9 @@ JVM_LEAF(void, JVM_Yield(JNIEnv *env, jclass threadClass))
   os::naked_yield();
 JVM_END
 
-JVM_ENTRY(void, JVM_Sleep(JNIEnv* env, jclass threadClass, jlong millis))
-  if (millis < 0) {
-    THROW_MSG(vmSymbols::java_lang_IllegalArgumentException(), "timeout value is negative");
+JVM_ENTRY(void, JVM_SleepNanos(JNIEnv* env, jclass threadClass, jlong nanos))
+  if (nanos < 0) {
+    THROW_MSG(vmSymbols::java_lang_IllegalArgumentException(), "nanosecond timeout value out of range");
   }
 
   if (thread->is_interrupted(true) && !HAS_PENDING_EXCEPTION) {
@@ -3056,14 +3048,14 @@ JVM_ENTRY(void, JVM_Sleep(JNIEnv* env, jclass threadClass, jlong millis))
   // And set new thread state to SLEEPING.
   JavaThreadSleepState jtss(thread);
 
-  HOTSPOT_THREAD_SLEEP_BEGIN(millis);
+  HOTSPOT_THREAD_SLEEP_BEGIN(nanos / NANOSECS_PER_MILLISEC);
 
-  if (millis == 0) {
+  if (nanos == 0) {
     os::naked_yield();
   } else {
     ThreadState old_state = thread->osthread()->get_state();
     thread->osthread()->set_state(SLEEPING);
-    if (!thread->sleep(millis)) { // interrupted
+    if (!thread->sleep_nanos(nanos)) { // interrupted
       // An asynchronous exception could have been thrown on
       // us while we were sleeping. We do not overwrite those.
       if (!HAS_PENDING_EXCEPTION) {
@@ -3095,7 +3087,15 @@ JVM_ENTRY(void, JVM_SetCurrentThread(JNIEnv* env, jobject thisThread,
                                      jobject theThread))
   oop threadObj = JNIHandles::resolve(theThread);
   thread->set_vthread(threadObj);
+
+  // Set lock id of new current Thread
+  thread->set_lock_id(java_lang_Thread::thread_id(threadObj));
+
   JFR_ONLY(Jfr::on_set_current_thread(thread, threadObj);)
+JVM_END
+
+JVM_ENTRY_NO_ENV(void, JVM_SetCurrentLockId(JNIEnv* env, jclass threadClass, jlong tid))
+  thread->set_lock_id(tid);
 JVM_END
 
 JVM_ENTRY(jlong, JVM_GetNextThreadIdOffset(JNIEnv* env, jclass threadClass))
@@ -3125,14 +3125,6 @@ JVM_END
 JVM_ENTRY(jobject, JVM_GetStackTrace(JNIEnv *env, jobject jthread))
   oop trace = java_lang_Thread::async_get_stack_trace(JNIHandles::resolve(jthread), THREAD);
   return JNIHandles::make_local(THREAD, trace);
-JVM_END
-
-JVM_ENTRY(void, JVM_DumpAllStacks(JNIEnv* env, jclass))
-  VM_PrintThreads op;
-  VMThread::execute(&op);
-  if (JvmtiExport::should_post_data_dump()) {
-    JvmtiExport::post_data_dump();
-  }
 JVM_END
 
 JVM_ENTRY(void, JVM_SetNativeThreadName(JNIEnv* env, jobject jthread, jstring name))
@@ -3293,8 +3285,7 @@ JVM_ENTRY(jobject, JVM_LatestUserDefinedLoader(JNIEnv *env))
     oop loader = ik->class_loader();
     if (loader != nullptr && !SystemDictionary::is_platform_class_loader(loader)) {
       // Skip reflection related frames
-      if (!ik->is_subclass_of(vmClasses::reflect_MethodAccessorImpl_klass()) &&
-          !ik->is_subclass_of(vmClasses::reflect_ConstructorAccessorImpl_klass())) {
+      if (!ik->is_subclass_of(vmClasses::reflect_SerializationConstructorAccessorImpl_klass())) {
         return JNIHandles::make_local(THREAD, loader);
       }
     }
@@ -3309,13 +3300,13 @@ JVM_END
 // resolve array handle and check arguments
 static inline arrayOop check_array(JNIEnv *env, jobject arr, bool type_array_only, TRAPS) {
   if (arr == nullptr) {
-    THROW_0(vmSymbols::java_lang_NullPointerException());
+    THROW_NULL(vmSymbols::java_lang_NullPointerException());
   }
   oop a = JNIHandles::resolve_non_null(arr);
   if (!a->is_array()) {
-    THROW_MSG_0(vmSymbols::java_lang_IllegalArgumentException(), "Argument is not an array");
+    THROW_MSG_NULL(vmSymbols::java_lang_IllegalArgumentException(), "Argument is not an array");
   } else if (type_array_only && !a->is_typeArray()) {
-    THROW_MSG_0(vmSymbols::java_lang_IllegalArgumentException(), "Argument is not an array of primitive type");
+    THROW_MSG_NULL(vmSymbols::java_lang_IllegalArgumentException(), "Argument is not an array of primitive type");
   }
   return arrayOop(a);
 }
@@ -3396,8 +3387,7 @@ JVM_END
 // Library support ///////////////////////////////////////////////////////////////////////////
 
 JVM_LEAF(void*, JVM_LoadZipLibrary())
-  ClassLoader::load_zip_library_if_needed();
-  return ClassLoader::zip_library_handle();
+  return ZipLibrary::handle();
 JVM_END
 
 JVM_ENTRY_NO_ENV(void*, JVM_LoadLibrary(const char* name, jboolean throwException))
@@ -3460,6 +3450,10 @@ JVM_END
 
 JVM_LEAF(jboolean, JVM_IsContinuationsSupported(void))
   return VMContinuations ? JNI_TRUE : JNI_FALSE;
+JVM_END
+
+JVM_LEAF(jboolean, JVM_IsForeignLinkerSupported(void))
+  return ForeignGlobals::is_foreign_linker_supported() ? JNI_TRUE : JNI_FALSE;
 JVM_END
 
 // String support ///////////////////////////////////////////////////////////////////////////
@@ -3549,7 +3543,7 @@ JVM_ENTRY(jobject, JVM_InvokeMethod(JNIEnv *env, jobject method, jobject obj, jo
     }
     return res;
   } else {
-    THROW_0(vmSymbols::java_lang_StackOverflowError());
+    THROW_NULL(vmSymbols::java_lang_StackOverflowError());
   }
 JVM_END
 
@@ -3563,12 +3557,6 @@ JVM_ENTRY(jobject, JVM_NewInstanceFromConstructor(JNIEnv *env, jobject c, jobjec
     JvmtiExport::post_vm_object_alloc(thread, result);
   }
   return res;
-JVM_END
-
-// Atomic ///////////////////////////////////////////////////////////////////////////////////////////
-
-JVM_LEAF(jboolean, JVM_SupportsCX8())
-  return VM_Version::supports_cx8();
 JVM_END
 
 JVM_ENTRY(void, JVM_InitializeFromArchive(JNIEnv* env, jclass cls))
@@ -3586,7 +3574,7 @@ JVM_ENTRY(void, JVM_RegisterLambdaProxyClassForArchiving(JNIEnv* env,
                                               jobject dynamicMethodType,
                                               jclass lambdaProxyClass))
 #if INCLUDE_CDS
-  if (!Arguments::is_dumping_archive()) {
+  if (!CDSConfig::is_dumping_archive()) {
     return;
   }
 
@@ -3673,16 +3661,9 @@ JVM_ENTRY(jclass, JVM_LookupLambdaProxyClassFromArchive(JNIEnv* env,
 #endif // INCLUDE_CDS
 JVM_END
 
-JVM_LEAF(jboolean, JVM_IsCDSDumpingEnabled(JNIEnv* env))
-  return Arguments::is_dumping_archive();
-JVM_END
-
-JVM_LEAF(jboolean, JVM_IsSharingEnabled(JNIEnv* env))
-  return UseSharedSpaces;
-JVM_END
-
 JVM_ENTRY_NO_ENV(jlong, JVM_GetRandomSeedForDumping())
-  if (DumpSharedSpaces) {
+  if (CDSConfig::is_dumping_static_archive()) {
+    // We do this so that the default CDS archive can be deterministic.
     const char* release = VM_Version::vm_release();
     const char* dbg_level = VM_Version::jdk_debug_level();
     const char* version = VM_Version::internal_vm_info_string();
@@ -3703,29 +3684,25 @@ JVM_ENTRY_NO_ENV(jlong, JVM_GetRandomSeedForDumping())
   }
 JVM_END
 
-JVM_LEAF(jboolean, JVM_IsDumpingClassList(JNIEnv *env))
-#if INCLUDE_CDS
-  return ClassListWriter::is_enabled() || DynamicDumpSharedSpaces;
-#else
-  return false;
-#endif // INCLUDE_CDS
+JVM_ENTRY_NO_ENV(jint, JVM_GetCDSConfigStatus())
+  return CDSConfig::get_status();
 JVM_END
 
 JVM_ENTRY(void, JVM_LogLambdaFormInvoker(JNIEnv *env, jstring line))
 #if INCLUDE_CDS
-  assert(ClassListWriter::is_enabled() || DynamicDumpSharedSpaces,  "Should be set and open or do dynamic dump");
+  assert(CDSConfig::is_logging_lambda_form_invokers(), "sanity");
   if (line != nullptr) {
     ResourceMark rm(THREAD);
     Handle h_line (THREAD, JNIHandles::resolve_non_null(line));
     char* c_line = java_lang_String::as_utf8_string(h_line());
-    if (DynamicDumpSharedSpaces) {
+    if (CDSConfig::is_dumping_dynamic_archive()) {
       // Note: LambdaFormInvokers::append take same format which is not
       // same as below the print format. The line does not include LAMBDA_FORM_TAG.
       LambdaFormInvokers::append(os::strdup((const char*)c_line, mtInternal));
     }
     if (ClassListWriter::is_enabled()) {
       ClassListWriter w;
-      w.stream()->print_cr("%s %s", LAMBDA_FORM_TAG, c_line);
+      w.stream()->print_cr("%s %s", ClassListParser::lambda_form_tag(), c_line);
     }
   }
 #endif // INCLUDE_CDS
@@ -3778,7 +3755,7 @@ JVM_ENTRY(jobjectArray, JVM_DumpThreads(JNIEnv *env, jclass threadClass, jobject
 
   // Check if threads is null
   if (threads == nullptr) {
-    THROW_(vmSymbols::java_lang_NullPointerException(), 0);
+    THROW_NULL(vmSymbols::java_lang_NullPointerException());
   }
 
   objArrayOop a = objArrayOop(JNIHandles::resolve_non_null(threads));
@@ -3786,13 +3763,13 @@ JVM_ENTRY(jobjectArray, JVM_DumpThreads(JNIEnv *env, jclass threadClass, jobject
   int num_threads = ah->length();
   // check if threads is non-empty array
   if (num_threads == 0) {
-    THROW_(vmSymbols::java_lang_IllegalArgumentException(), 0);
+    THROW_NULL(vmSymbols::java_lang_IllegalArgumentException());
   }
 
   // check if threads is not an array of objects of Thread class
   Klass* k = ObjArrayKlass::cast(ah->klass())->element_klass();
   if (k != vmClasses::Thread_klass()) {
-    THROW_(vmSymbols::java_lang_IllegalArgumentException(), 0);
+    THROW_NULL(vmSymbols::java_lang_IllegalArgumentException());
   }
 
   ResourceMark rm(THREAD);
@@ -3905,56 +3882,72 @@ JVM_LEAF(jint, JVM_FindSignal(const char *name))
   return os::get_signal_number(name);
 JVM_END
 
-// If notifications are disabled then just update the VTMS transition bit and return.
-// Otherwise, the bit is updated in the given jvmtiVTMSTransitionDisabler function call.
-JVM_ENTRY(void, JVM_VirtualThreadMount(JNIEnv* env, jobject vthread, jboolean hide, jboolean first_mount))
+JVM_ENTRY(void, JVM_VirtualThreadStart(JNIEnv* env, jobject vthread))
 #if INCLUDE_JVMTI
   if (!DoJVMTIVirtualThreadTransitions) {
     assert(!JvmtiExport::can_support_virtual_threads(), "sanity check");
     return;
   }
-  if (!JvmtiVTMSTransitionDisabler::VTMS_notify_jvmti_events()) {
-    thread->set_is_in_VTMS_transition(hide);
-    oop vt = JNIHandles::resolve_external_guard(vthread);
-    java_lang_Thread::set_is_in_VTMS_transition(vt, hide);
+  if (JvmtiVTMSTransitionDisabler::VTMS_notify_jvmti_events()) {
+    JvmtiVTMSTransitionDisabler::VTMS_vthread_start(vthread);
+  } else {
+    // set VTMS transition bit value in JavaThread and java.lang.VirtualThread object
+    JvmtiVTMSTransitionDisabler::set_is_in_VTMS_transition(thread, vthread, false);
+  }
+#endif
+JVM_END
+
+JVM_ENTRY(void, JVM_VirtualThreadEnd(JNIEnv* env, jobject vthread))
+#if INCLUDE_JVMTI
+  if (!DoJVMTIVirtualThreadTransitions) {
+    assert(!JvmtiExport::can_support_virtual_threads(), "sanity check");
     return;
   }
-  if (hide) {
-   JvmtiVTMSTransitionDisabler::VTMS_mount_begin(vthread, first_mount);
+  if (JvmtiVTMSTransitionDisabler::VTMS_notify_jvmti_events()) {
+    JvmtiVTMSTransitionDisabler::VTMS_vthread_end(vthread);
   } else {
-   JvmtiVTMSTransitionDisabler::VTMS_mount_end(vthread, first_mount);
+    // set VTMS transition bit value in JavaThread and java.lang.VirtualThread object
+    JvmtiVTMSTransitionDisabler::set_is_in_VTMS_transition(thread, vthread, true);
   }
-#else
-  fatal("Should only be called with JVMTI enabled");
+#endif
+JVM_END
+
+// If notifications are disabled then just update the VTMS transition bit and return.
+// Otherwise, the bit is updated in the given jvmtiVTMSTransitionDisabler function call.
+JVM_ENTRY(void, JVM_VirtualThreadMount(JNIEnv* env, jobject vthread, jboolean hide))
+#if INCLUDE_JVMTI
+  if (!DoJVMTIVirtualThreadTransitions) {
+    assert(!JvmtiExport::can_support_virtual_threads(), "sanity check");
+    return;
+  }
+  if (JvmtiVTMSTransitionDisabler::VTMS_notify_jvmti_events()) {
+    JvmtiVTMSTransitionDisabler::VTMS_vthread_mount(vthread, hide);
+  } else {
+    // set VTMS transition bit value in JavaThread and java.lang.VirtualThread object
+    JvmtiVTMSTransitionDisabler::set_is_in_VTMS_transition(thread, vthread, hide);
+  }
 #endif
 JVM_END
 
 // If notifications are disabled then just update the VTMS transition bit and return.
 // Otherwise, the bit is updated in the given jvmtiVTMSTransitionDisabler function call below.
-JVM_ENTRY(void, JVM_VirtualThreadUnmount(JNIEnv* env, jobject vthread, jboolean hide, jboolean last_unmount))
+JVM_ENTRY(void, JVM_VirtualThreadUnmount(JNIEnv* env, jobject vthread, jboolean hide))
 #if INCLUDE_JVMTI
   if (!DoJVMTIVirtualThreadTransitions) {
     assert(!JvmtiExport::can_support_virtual_threads(), "sanity check");
     return;
   }
-  if (!JvmtiVTMSTransitionDisabler::VTMS_notify_jvmti_events()) {
-    thread->set_is_in_VTMS_transition(hide);
-    oop vt = JNIHandles::resolve_external_guard(vthread);
-    java_lang_Thread::set_is_in_VTMS_transition(vt, hide);
-    return;
-  }
-  if (hide) {
-   JvmtiVTMSTransitionDisabler::VTMS_unmount_begin(vthread, last_unmount);
+  if (JvmtiVTMSTransitionDisabler::VTMS_notify_jvmti_events()) {
+    JvmtiVTMSTransitionDisabler::VTMS_vthread_unmount(vthread, hide);
   } else {
-   JvmtiVTMSTransitionDisabler::VTMS_unmount_end(vthread, last_unmount);
+    // set VTMS transition bit value in JavaThread and java.lang.VirtualThread object
+    JvmtiVTMSTransitionDisabler::set_is_in_VTMS_transition(thread, vthread, hide);
   }
-#else
-  fatal("Should only be called with JVMTI enabled");
 #endif
 JVM_END
 
 // Always update the temporary VTMS transition bit.
-JVM_ENTRY(void, JVM_VirtualThreadHideFrames(JNIEnv* env, jobject vthread, jboolean hide))
+JVM_ENTRY(void, JVM_VirtualThreadHideFrames(JNIEnv* env, jclass clazz, jboolean hide))
 #if INCLUDE_JVMTI
   if (!DoJVMTIVirtualThreadTransitions) {
     assert(!JvmtiExport::can_support_virtual_threads(), "sanity check");
@@ -3963,11 +3956,56 @@ JVM_ENTRY(void, JVM_VirtualThreadHideFrames(JNIEnv* env, jobject vthread, jboole
   assert(!thread->is_in_VTMS_transition(), "sanity check");
   assert(thread->is_in_tmp_VTMS_transition() != (bool)hide, "sanity check");
   thread->toggle_is_in_tmp_VTMS_transition();
-#else
-  fatal("Should only be called with JVMTI enabled");
 #endif
 JVM_END
 
+// Notification from VirtualThread about disabling JVMTI Suspend in a sync critical section.
+// Needed to avoid deadlocks with JVMTI suspend mechanism.
+JVM_ENTRY(void, JVM_VirtualThreadDisableSuspend(JNIEnv* env, jclass clazz, jboolean enter))
+#if INCLUDE_JVMTI
+  if (!DoJVMTIVirtualThreadTransitions) {
+    assert(!JvmtiExport::can_support_virtual_threads(), "sanity check");
+    return;
+  }
+  assert(thread->is_disable_suspend() != (bool)enter,
+         "nested or unbalanced monitor enter/exit is not allowed");
+  thread->toggle_is_disable_suspend();
+#endif
+JVM_END
+
+JVM_ENTRY_NO_ENV(void, JVM_VirtualThreadPinnedEvent(jint reasonCode, jstring reasonString))
+#if INCLUDE_JFR
+  EventVirtualThreadPinned e;
+  if (e.should_commit()) {
+    ResourceMark rm(THREAD);
+    // ignore reason code for now
+    const char *reason = java_lang_String::as_utf8_string(JNIHandles::resolve_non_null(reasonString));
+    e.set_pinnedReason(reason);
+    e.set_carrierThread(JFR_JVM_THREAD_ID(THREAD));
+    e.commit();
+  }
+#endif
+JVM_END
+
+JVM_ENTRY(jobject, JVM_TakeVirtualThreadListToUnblock(JNIEnv* env, jclass ignored))
+  ParkEvent* parkEvent = ObjectMonitor::vthread_unparker_ParkEvent();
+  assert(parkEvent != nullptr, "not initialized");
+
+  OopHandle& list_head = ObjectMonitor::vthread_cxq_head();
+  oop vthread_head = nullptr;
+  while (true) {
+    if (list_head.peek() != nullptr) {
+      for (;;) {
+        oop head = list_head.resolve();
+        if (list_head.cmpxchg(head, nullptr) == head) {
+          return JNIHandles::make_local(THREAD, head);
+        }
+      }
+    }
+    ThreadBlockInVM tbivm(THREAD);
+    parkEvent->park();
+  }
+JVM_END
 /*
  * Return the current class's class file version.  The low order 16 bits of the
  * returned jint contain the class's major version.  The high order 16 bits
@@ -3994,4 +4032,11 @@ JVM_END
  */
 JVM_ENTRY(void, JVM_EnsureMaterializedForStackWalk_func(JNIEnv* env, jobject vthread, jobject value))
   JVM_EnsureMaterializedForStackWalk(env, value);
+JVM_END
+
+/*
+ * Return JNI_TRUE if warnings are printed when agents are dynamically loaded.
+ */
+JVM_LEAF(jboolean, JVM_PrintWarningAtDynamicAgentLoad(void))
+  return (EnableDynamicAgentLoading && !FLAG_IS_CMDLINE(EnableDynamicAgentLoading)) ? JNI_TRUE : JNI_FALSE;
 JVM_END

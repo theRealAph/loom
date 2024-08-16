@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1997, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1997, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -37,6 +37,7 @@
 #include "oops/method.hpp"
 #include "oops/oop.inline.hpp"
 #include "oops/symbol.hpp"
+#include "prims/jvmtiAgentList.hpp"
 #include "prims/jvm_misc.hpp"
 #include "prims/jvmtiExport.hpp"
 #include "prims/nativeLookup.hpp"
@@ -209,6 +210,7 @@ extern "C" {
   void JNICALL JVM_RegisterVectorSupportMethods(JNIEnv *env, jclass vsclass);
 #if INCLUDE_JVMCI
   jobject  JNICALL JVM_GetJVMCIRuntime(JNIEnv *env, jclass c);
+  jlong    JNICALL JVM_ReadSystemPropertiesInfo(JNIEnv *env, jclass c, jintArray offsets);
   void     JNICALL JVM_RegisterJVMCINatives(JNIEnv *env, jclass compilerToVMClass);
 #endif
 }
@@ -228,6 +230,7 @@ static JNINativeMethod lookup_special_native_methods[] = {
   { CC"Java_jdk_internal_vm_vector_VectorSupport_registerNatives", nullptr, FN_PTR(JVM_RegisterVectorSupportMethods)},
 #if INCLUDE_JVMCI
   { CC"Java_jdk_vm_ci_runtime_JVMCI_initializeRuntime",            nullptr, FN_PTR(JVM_GetJVMCIRuntime)             },
+  { CC"Java_jdk_vm_ci_services_Services_readSystemPropertiesInfo", nullptr, FN_PTR(JVM_ReadSystemPropertiesInfo)    },
   { CC"Java_jdk_vm_ci_hotspot_CompilerToVM_registerNatives",       nullptr, FN_PTR(JVM_RegisterJVMCINatives)        },
 #endif
 #if INCLUDE_JFR
@@ -285,9 +288,9 @@ address NativeLookup::lookup_style(const methodHandle& method, char* pure_name, 
 
   if (entry == nullptr) {
     // findNative didn't find it, if there are any agent libraries look in them
-    AgentLibrary* agent;
-    for (agent = Arguments::agents(); agent != nullptr; agent = agent->next()) {
-      entry = (address) os::dll_lookup(agent->os_lib(), jni_name);
+    JvmtiAgentList::Iterator it = JvmtiAgentList::agents();
+    while (it.has_next()) {
+      entry = (address)os::dll_lookup(it.next()->os_lib(), jni_name);
       if (entry != nullptr) {
         return entry;
       }
@@ -411,7 +414,7 @@ address NativeLookup::lookup_base(const methodHandle& method, TRAPS) {
   ss.print("'");
   method->print_external_name(&ss);
   ss.print("'");
-  THROW_MSG_0(vmSymbols::java_lang_UnsatisfiedLinkError(), ss.as_string());
+  THROW_MSG_NULL(vmSymbols::java_lang_UnsatisfiedLinkError(), ss.as_string());
 }
 
 

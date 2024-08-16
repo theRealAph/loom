@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1994, 2023, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1994, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -162,7 +162,16 @@ import static java.util.concurrent.TimeUnit.NANOSECONDS;
  * }
  *
  * <h2><a id="inheritance">Inheritance when creating threads</a></h2>
- * A {@code Thread} inherits its initial values of {@linkplain InheritableThreadLocal
+ * A {@code Thread} created with one of the public constructors inherits the daemon
+ * status and thread priority from the parent thread at the time that the child {@code
+ * Thread} is created. The {@linkplain ThreadGroup thread group} is also inherited when
+ * not provided to the constructor (and not selected by the security manager).
+ * When using a {@code Thread.Builder} to create a platform thread, the daemon status,
+ * thread priority, and thread group (when not selected by the security manager) are
+ * inherited when not set on the builder. As with the constructors, inheriting from the
+ * parent thread is done when the child {@code Thread} is created.
+ *
+ * <p> A {@code Thread} inherits its initial values of {@linkplain InheritableThreadLocal
  * inheritable-thread-local} variables (including the context class loader) from
  * the parent thread values at the time that the child {@code Thread} is created.
  * The 5-param {@linkplain Thread#Thread(ThreadGroup, Runnable, String, long, boolean)
@@ -170,9 +179,6 @@ import static java.util.concurrent.TimeUnit.NANOSECONDS;
  * values from the constructing thread. When using a {@code Thread.Builder}, the
  * {@link Builder#inheritInheritableThreadLocals(boolean) inheritInheritableThreadLocals}
  * method can be used to select if the initial values are inherited.
- *
- * <p> Platform threads inherit the daemon status, thread priority, and when not
- * provided (or not selected by a security manager), the thread group.
  *
  * <p> Creating a platform thread {@linkplain AccessController#getContext() captures} the
  * {@linkplain AccessControlContext caller context} to limit the {@linkplain Permission
@@ -189,7 +195,7 @@ import static java.util.concurrent.TimeUnit.NANOSECONDS;
  * In the JDK Reference Implementation, the virtual thread scheduler may be configured
  * with the following system properties:
  * <table class="striped">
- * <caption style="display:none:">System properties</caption>
+ * <caption style="display:none">System properties</caption>
  *   <thead>
  *   <tr>
  *     <th scope="col">System property</th>
@@ -201,8 +207,8 @@ import static java.util.concurrent.TimeUnit.NANOSECONDS;
  *     <th scope="row">
  *       {@systemProperty jdk.virtualThreadScheduler.parallelism}
  *     </th>
- *     <td> The number of platform threads available for scheduling virtual
- *       threads. It defaults to the number of available processors. </td>
+ *     <td> The scheduler's target parallelism. It defaults to the number of
+ *       available processors. </td>
  *   </tr>
  *   <tr>
  *     <th scope="row">
@@ -345,15 +351,20 @@ public class Thread implements Runnable {
      * operation, if any.  The blocker's interrupt method should be invoked
      * after setting this thread's interrupt status.
      */
-    volatile Interruptible nioBlocker;
+    private Interruptible nioBlocker;
+
+    Interruptible nioBlocker() {
+        //assert Thread.holdsLock(interruptLock);
+        return nioBlocker;
+    }
 
     /* Set the blocker field; invoked via jdk.internal.access.SharedSecrets
      * from java.nio code
      */
-    static void blockedOn(Interruptible b) {
-        Thread me = Thread.currentThread();
-        synchronized (me.interruptLock) {
-            me.nioBlocker = b;
+    void blockedOn(Interruptible b) {
+        //assert Thread.currentThread() == this;
+        synchronized (interruptLock) {
+            nioBlocker = b;
         }
     }
 
@@ -410,6 +421,12 @@ public class Thread implements Runnable {
      */
     @IntrinsicCandidate
     native void setCurrentThread(Thread thread);
+
+    /**
+     * Sets the current thread's lock ID.
+     */
+    @IntrinsicCandidate
+    static native void setCurrentLockId(long tid);
 
     // ScopedValue support:
 
@@ -479,6 +496,25 @@ public class Thread implements Runnable {
     }
 
     /**
+     * Sleep for the specified number of nanoseconds, subject to the precision
+     * and accuracy of system timers and schedulers.
+     */
+    private static void sleepNanos(long nanos) throws InterruptedException {
+        ThreadSleepEvent event = beforeSleep(nanos);
+        try {
+            if (currentThread() instanceof VirtualThread vthread) {
+                vthread.sleepNanos(nanos);
+            } else {
+                sleepNanos0(nanos);
+            }
+        } finally {
+            afterSleep(event);
+        }
+    }
+
+    private static native void sleepNanos0(long nanos) throws InterruptedException;
+
+    /**
      * Causes the currently executing thread to sleep (temporarily cease
      * execution) for the specified number of milliseconds, subject to
      * the precision and accuracy of system timers and schedulers. The thread
@@ -499,21 +535,9 @@ public class Thread implements Runnable {
         if (millis < 0) {
             throw new IllegalArgumentException("timeout value is negative");
         }
-
         long nanos = MILLISECONDS.toNanos(millis);
-        ThreadSleepEvent event = beforeSleep(nanos);
-        try {
-            if (currentThread() instanceof VirtualThread vthread) {
-                vthread.sleepNanos(nanos);
-            } else {
-                sleep0(millis);
-            }
-        } finally {
-            afterSleep(event);
-        }
+        sleepNanos(nanos);
     }
-
-    private static native void sleep0(long millis) throws InterruptedException;
 
     /**
      * Causes the currently executing thread to sleep (temporarily cease
@@ -549,21 +573,7 @@ public class Thread implements Runnable {
         // total sleep time, in nanoseconds
         long totalNanos = MILLISECONDS.toNanos(millis);
         totalNanos += Math.min(Long.MAX_VALUE - totalNanos, nanos);
-
-        ThreadSleepEvent event = beforeSleep(totalNanos);
-        try {
-            if (currentThread() instanceof VirtualThread vthread) {
-                vthread.sleepNanos(totalNanos);
-            } else {
-                // millisecond precision
-                if (nanos > 0 && millis < Long.MAX_VALUE) {
-                    millis++;
-                }
-                sleep0(millis);
-            }
-        } finally {
-            afterSleep(event);
-        }
+        sleepNanos(totalNanos);
     }
 
     /**
@@ -587,22 +597,7 @@ public class Thread implements Runnable {
         if (nanos < 0) {
             return;
         }
-
-        ThreadSleepEvent event = beforeSleep(nanos);
-        try {
-            if (currentThread() instanceof VirtualThread vthread) {
-                vthread.sleepNanos(nanos);
-            } else {
-                // millisecond precision
-                long millis = NANOSECONDS.toMillis(nanos);
-                if (nanos > MILLISECONDS.toNanos(millis)) {
-                    millis += 1L;
-                }
-                sleep0(millis);
-            }
-        } finally {
-            afterSleep(event);
-        }
+        sleepNanos(nanos);
     }
 
     /**
@@ -738,10 +733,11 @@ public class Thread implements Runnable {
         }
 
         if (attached && VM.initLevel() < 1) {
-            this.tid = 1;  // primordial thread
+            this.tid = 3;  // primordial thread
         } else {
             this.tid = ThreadIdentifiers.next();
         }
+
         this.name = (name != null) ? name : genThreadName();
 
         if (acc != null) {
@@ -1600,7 +1596,7 @@ public class Thread implements Runnable {
      */
     @Hidden
     @ForceInline
-    private void runWith(Object bindings, Runnable op) {
+    final void runWith(Object bindings, Runnable op) {
         ensureMaterializedForStackWalk(bindings);
         op.run();
         Reference.reachabilityFence(bindings);
@@ -1669,7 +1665,7 @@ public class Thread implements Runnable {
      *       interrupt the wait.
      *       For more information, see
      *       <a href="{@docRoot}/java.base/java/lang/doc-files/threadPrimitiveDeprecation.html">Why
-     *       are Thread.stop, Thread.suspend and Thread.resume Deprecated?</a>.
+     *       is Thread.stop deprecated and the ability to stop a thread removed?</a>.
      */
     @Deprecated(since="1.2", forRemoval=true)
     public final void stop() {
@@ -1711,30 +1707,33 @@ public class Thread implements Runnable {
      *
      * @implNote In the JDK Reference Implementation, interruption of a thread
      * that is not alive still records that the interrupt request was made and
-     * will report it via {@link #interrupted} and {@link #isInterrupted()}.
+     * will report it via {@link #interrupted()} and {@link #isInterrupted()}.
      *
      * @throws  SecurityException
      *          if the current thread cannot modify this thread
-     *
-     * @revised 6.0, 14
      */
     public void interrupt() {
         if (this != Thread.currentThread()) {
             checkAccess();
-
-            // thread may be blocked in an I/O operation
-            synchronized (interruptLock) {
-                Interruptible b = nioBlocker;
-                if (b != null) {
-                    interrupted = true;
-                    interrupt0();  // inform VM of interrupt
-                    b.interrupt(this);
-                    return;
-                }
-            }
         }
+
+        // Setting the interrupt status must be done before reading nioBlocker.
         interrupted = true;
         interrupt0();  // inform VM of interrupt
+
+        // thread may be blocked in an I/O operation
+        if (this != Thread.currentThread()) {
+            Interruptible blocker;
+            synchronized (interruptLock) {
+                blocker = nioBlocker;
+                if (blocker != null) {
+                    blocker.interrupt(this);
+                }
+            }
+            if (blocker != null) {
+                blocker.postInterrupt();
+            }
+        }
     }
 
     /**
@@ -1748,7 +1747,6 @@ public class Thread implements Runnable {
      * @return  {@code true} if the current thread has been interrupted;
      *          {@code false} otherwise.
      * @see #isInterrupted()
-     * @revised 6.0, 14
      */
     public static boolean interrupted() {
         return currentThread().getAndClearInterrupt();
@@ -1761,7 +1759,6 @@ public class Thread implements Runnable {
      * @return  {@code true} if this thread has been interrupted;
      *          {@code false} otherwise.
      * @see     #interrupted()
-     * @revised 6.0, 14
      */
     public boolean isInterrupted() {
         return interrupted;
@@ -1812,44 +1809,6 @@ public class Thread implements Runnable {
      */
     boolean alive() {
         return eetop != 0;
-    }
-
-    /**
-     * Throws {@code UnsupportedOperationException}.
-     *
-     * @throws  UnsupportedOperationException always
-     *
-     * @deprecated This method was originally specified to suspend a thread.
-     *     It was inherently deadlock-prone. If the target thread held a lock on
-     *     a monitor protecting a critical system resource when it was suspended,
-     *     no thread could access the resource until the target thread was resumed.
-     *     If the thread intending to resume the target thread attempted to lock
-     *     the monitor prior to calling {@code resume}, deadlock would result.
-     *     Such deadlocks typically manifested themselves as "frozen" processes.
-     *     For more information, see
-     *     <a href="{@docRoot}/java.base/java/lang/doc-files/threadPrimitiveDeprecation.html">Why
-     *     are Thread.stop, Thread.suspend and Thread.resume Deprecated?</a>.
-     */
-    @Deprecated(since="1.2", forRemoval=true)
-    public final void suspend() {
-        throw new UnsupportedOperationException();
-    }
-
-    /**
-     * Throws {@code UnsupportedOperationException}.
-     *
-     * @throws  UnsupportedOperationException always
-     *
-     * @deprecated This method was originally specified to resume a thread
-     *     suspended with {@link #suspend()}. Suspending a thread was
-     *     inherently deadlock-prone.
-     *     For more information, see
-     *     <a href="{@docRoot}/java.base/java/lang/doc-files/threadPrimitiveDeprecation.html">Why
-     *     are Thread.stop, Thread.suspend and Thread.resume Deprecated?</a>.
-     */
-    @Deprecated(since="1.2", forRemoval=true)
-    public final void resume() {
-        throw new UnsupportedOperationException();
     }
 
     /**
@@ -2018,22 +1977,6 @@ public class Thread implements Runnable {
      */
     public static int enumerate(Thread[] tarray) {
         return currentThread().getThreadGroup().enumerate(tarray);
-    }
-
-    /**
-     * Throws {@code UnsupportedOperationException}.
-     *
-     * @return     nothing
-     *
-     * @deprecated This method was originally designed to count the number of
-     *             stack frames but the results were never well-defined and it
-     *             depended on thread-suspension.
-     *             This method is subject to removal in a future version of Java SE.
-     * @see        StackWalker
-     */
-    @Deprecated(since="1.2", forRemoval=true)
-    public int countStackFrames() {
-        throw new UnsupportedOperationException();
     }
 
     /**

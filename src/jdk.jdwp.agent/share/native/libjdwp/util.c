@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 1998, 2024, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -1074,23 +1074,6 @@ debugMonitorWait(jrawMonitorID monitor)
 }
 
 void
-debugMonitorTimedWait(jrawMonitorID monitor, jlong millis)
-{
-    jvmtiError error;
-    error = JVMTI_FUNC_PTR(gdata->jvmti,RawMonitorWait)
-        (gdata->jvmti, monitor, millis);
-    if (error == JVMTI_ERROR_INTERRUPT) {
-        /* See comment above */
-        handleInterrupt();
-        error = JVMTI_ERROR_NONE;
-    }
-    error = ignore_vm_death(error);
-    if (error != JVMTI_ERROR_NONE) {
-        EXIT_ERROR(error, "on raw monitor timed wait");
-    }
-}
-
-void
 debugMonitorNotify(jrawMonitorID monitor)
 {
     jvmtiError error;
@@ -2001,8 +1984,6 @@ eventIndex2jvmti(EventIndex ei)
     return event;
 }
 
-#ifdef DEBUG
-
 char*
 eventIndex2EventName(EventIndex ei)
 {
@@ -2056,8 +2037,6 @@ eventIndex2EventName(EventIndex ei)
             return "Bad EI";
     }
 }
-
-#endif
 
 EventIndex
 jdwp2EventIndex(jdwpEvent eventType)

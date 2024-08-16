@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2021, 2022, Oracle and/or its affiliates. All rights reserved.
+ * Copyright (c) 2021, 2023, Oracle and/or its affiliates. All rights reserved.
  * DO NOT ALTER OR REMOVE COPYRIGHT NOTICES OR THIS FILE HEADER.
  *
  * This code is free software; you can redistribute it and/or modify it
@@ -30,13 +30,16 @@
 #include "gc/shared/collectedHeap.hpp"
 #include "gc/shared/barrierSet.hpp"
 #include "gc/shared/barrierSetStackChunk.hpp"
+#include "gc/shared/gc_globals.hpp"
 #include "memory/memRegion.hpp"
 #include "memory/universe.hpp"
 #include "oops/access.inline.hpp"
 #include "oops/instanceStackChunkKlass.inline.hpp"
 #include "runtime/continuationJavaClasses.inline.hpp"
 #include "runtime/frame.inline.hpp"
+#include "runtime/globals.hpp"
 #include "runtime/handles.inline.hpp"
+#include "runtime/objectMonitor.hpp"
 #include "runtime/registerMap.hpp"
 #include "runtime/smallRegisterMap.inline.hpp"
 #include "utilities/macros.hpp"
@@ -58,14 +61,14 @@ inline void stackChunkOopDesc::set_parent_access(oop value)    { jdk_internal_vm
 
 inline int stackChunkOopDesc::stack_size() const        { return jdk_internal_vm_StackChunk::size(as_oop()); }
 
+inline int stackChunkOopDesc::bottom() const            { return jdk_internal_vm_StackChunk::bottom(as_oop()); }
+inline void stackChunkOopDesc::set_bottom(int value)    { jdk_internal_vm_StackChunk::set_bottom(this, value); }
+
 inline int stackChunkOopDesc::sp() const                { return jdk_internal_vm_StackChunk::sp(as_oop()); }
 inline void stackChunkOopDesc::set_sp(int value)        { jdk_internal_vm_StackChunk::set_sp(this, value); }
 
 inline address stackChunkOopDesc::pc() const            { return jdk_internal_vm_StackChunk::pc(as_oop()); }
 inline void stackChunkOopDesc::set_pc(address value)    { jdk_internal_vm_StackChunk::set_pc(this, value); }
-
-inline int stackChunkOopDesc::argsize() const           { return jdk_internal_vm_StackChunk::argsize(as_oop()); }
-inline void stackChunkOopDesc::set_argsize(int value)   { jdk_internal_vm_StackChunk::set_argsize(as_oop(), value); }
 
 inline uint8_t stackChunkOopDesc::flags() const         { return jdk_internal_vm_StackChunk::flags(as_oop()); }
 inline void stackChunkOopDesc::set_flags(uint8_t value) { jdk_internal_vm_StackChunk::set_flags(this, value); }
@@ -86,17 +89,25 @@ inline void stackChunkOopDesc::set_max_thawing_size(int value)  {
   jdk_internal_vm_StackChunk::set_maxThawingSize(this, (jint)value);
 }
 
-inline oop stackChunkOopDesc::cont() const                { return UseCompressedOops ? cont<narrowOop>() : cont<oop>(); /* jdk_internal_vm_StackChunk::cont(as_oop()); */ }
-template<typename P>
+inline uint8_t stackChunkOopDesc::lockstack_size() const         { return jdk_internal_vm_StackChunk::lockStackSize(as_oop()); }
+inline void stackChunkOopDesc::set_lockstack_size(uint8_t value) { jdk_internal_vm_StackChunk::set_lockStackSize(this, value); }
+
+inline ObjectWaiter* stackChunkOopDesc::object_waiter() const       { return (ObjectWaiter*)jdk_internal_vm_StackChunk::objectWaiter(as_oop()); }
+inline void stackChunkOopDesc::set_object_waiter(ObjectWaiter* obj) { jdk_internal_vm_StackChunk::set_objectWaiter(this, (address)obj); }
+
 inline oop stackChunkOopDesc::cont() const                {
-  // The state of the cont oop is used by ZCollectedHeap::requires_barriers,
-  // to determine the age of the stackChunkOopDesc. For that to work, it is
-  // only the GC that is allowed to perform a load barrier on the oop.
-  // This function is used by non-GC code and therfore create a stack-local
-  // copy on the oop and perform the load barrier on that copy instead.
-  oop obj = jdk_internal_vm_StackChunk::cont_raw<P>(as_oop());
-  obj = (oop)NativeAccess<>::oop_load(&obj);
-  return obj;
+  if (UseZGC && !ZGenerational) {
+    assert(!UseCompressedOops, "Non-generational ZGC does not support compressed oops");
+    // The state of the cont oop is used by XCollectedHeap::requires_barriers,
+    // to determine the age of the stackChunkOopDesc. For that to work, it is
+    // only the GC that is allowed to perform a load barrier on the oop.
+    // This function is used by non-GC code and therfore create a stack-local
+    // copy on the oop and perform the load barrier on that copy instead.
+    oop obj = jdk_internal_vm_StackChunk::cont_raw<oop>(as_oop());
+    obj = (oop)NativeAccess<>::oop_load(&obj);
+    return obj;
+  }
+  return jdk_internal_vm_StackChunk::cont(as_oop());
 }
 inline void stackChunkOopDesc::set_cont(oop value)        { jdk_internal_vm_StackChunk::set_cont(this, value); }
 template<typename P>
@@ -104,7 +115,10 @@ inline void stackChunkOopDesc::set_cont_raw(oop value)    { jdk_internal_vm_Stac
 template<DecoratorSet decorators>
 inline void stackChunkOopDesc::set_cont_access(oop value) { jdk_internal_vm_StackChunk::set_cont_access<decorators>(this, value); }
 
-inline int stackChunkOopDesc::bottom() const { return stack_size() - argsize() - frame::metadata_words_at_top; }
+inline int stackChunkOopDesc::argsize() const {
+  assert(!is_empty(), "should not ask for argsize in empty chunk");
+  return stack_size() - bottom() - frame::metadata_words_at_top;
+}
 
 inline HeapWord* stackChunkOopDesc::start_of_stack() const {
    return (HeapWord*)(cast_from_oop<intptr_t>(as_oop()) + InstanceStackChunkKlass::offset_of_stack());
@@ -119,7 +133,7 @@ inline int stackChunkOopDesc::to_offset(intptr_t* p) const {
   assert(is_in_chunk(p)
     || (p >= start_address() && (p - start_address()) <= stack_size() + frame::metadata_words),
     "p: " PTR_FORMAT " start: " PTR_FORMAT " end: " PTR_FORMAT, p2i(p), p2i(start_address()), p2i(bottom_address()));
-  return p - start_address();
+  return (int)(p - start_address());
 }
 
 inline intptr_t* stackChunkOopDesc::from_offset(int offset) const {
@@ -128,10 +142,8 @@ inline intptr_t* stackChunkOopDesc::from_offset(int offset) const {
 }
 
 inline bool stackChunkOopDesc::is_empty() const {
-  assert(sp() <= stack_size(), "");
-  assert((sp() == stack_size()) == (sp() >= stack_size() - argsize() - frame::metadata_words_at_top),
-    "sp: %d size: %d argsize: %d", sp(), stack_size(), argsize());
-  return sp() == stack_size();
+  assert(sp() <= bottom(), "");
+  return sp() == bottom();
 }
 
 inline bool stackChunkOopDesc::is_in_chunk(void* p) const {
@@ -156,15 +168,50 @@ inline void stackChunkOopDesc::set_flag(uint8_t flag, bool value) {
   uint32_t flags = this->flags();
   set_flags((uint8_t)(value ? flags |= flag : flags &= ~flag));
 }
+inline void stackChunkOopDesc::clear_flags(uint8_t flag) {
+  uint32_t flags = this->flags();
+  set_flags((uint8_t)(flags &= ~flag));
+}
 inline void stackChunkOopDesc::clear_flags() {
   set_flags(0);
 }
 
 inline bool stackChunkOopDesc::has_mixed_frames() const { return is_flag(FLAG_HAS_INTERPRETED_FRAMES); }
 inline void stackChunkOopDesc::set_has_mixed_frames(bool value) {
-  assert((flags() & ~FLAG_HAS_INTERPRETED_FRAMES) == 0, "other flags should not be set");
+  assert((flags() & ~(FLAG_HAS_INTERPRETED_FRAMES | FLAGS_PREEMPTED)) == 0, "other flags should not be set");
   set_flag(FLAG_HAS_INTERPRETED_FRAMES, value);
 }
+
+inline void stackChunkOopDesc::set_preempt_kind(int freeze_kind) {
+  assert((flags() & FLAGS_PREEMPTED) == 0, "");
+  assert(freeze_kind == freeze_on_monitorenter || freeze_kind == freeze_on_wait, "");
+  uint8_t flag = freeze_kind == freeze_on_monitorenter ? FLAG_PREEMPTED_MONITORENTER : FLAG_PREEMPTED_WAIT;
+  set_flag(flag, true);
+}
+
+inline int stackChunkOopDesc::get_and_clear_preempt_kind() {
+  assert((is_flag(FLAG_PREEMPTED_MONITORENTER) && !is_flag(FLAG_PREEMPTED_WAIT))
+         || (is_flag(FLAG_PREEMPTED_WAIT) && !is_flag(FLAG_PREEMPTED_MONITORENTER)), "");
+  int kind = is_flag(FLAG_PREEMPTED_MONITORENTER) ? freeze_on_monitorenter : freeze_on_wait;
+  clear_flags(FLAGS_PREEMPTED);
+  return kind;
+}
+
+inline ObjectMonitor* stackChunkOopDesc::current_pending_monitor() const {
+  ObjectWaiter* waiter = object_waiter();
+  if (waiter != nullptr && (waiter->is_monitorenter() || (waiter->is_wait() && (waiter->at_reenter() || waiter->notified())))) {
+    return waiter->monitor();
+  }
+  return nullptr;
+}
+
+inline ObjectMonitor* stackChunkOopDesc::current_waiting_monitor() const {
+  ObjectWaiter* waiter = object_waiter();
+  return waiter != nullptr && waiter->is_wait() ? waiter->monitor() : nullptr;
+}
+
+inline bool stackChunkOopDesc::has_lockstack() const         { return is_flag(FLAG_HAS_LOCKSTACK); }
+inline void stackChunkOopDesc::set_has_lockstack(bool value) { set_flag(FLAG_HAS_LOCKSTACK, value); }
 
 inline bool stackChunkOopDesc::is_gc_mode() const                  { return is_flag(FLAG_GC_MODE); }
 inline bool stackChunkOopDesc::is_gc_mode_acquire() const          { return is_flag_acquire(FLAG_GC_MODE); }
@@ -188,6 +235,16 @@ void stackChunkOopDesc::do_barriers(const StackChunkFrameStream<frame_kind>& f, 
   do_barriers0<barrier>(f, map);
 }
 
+template <typename OopT, class StackChunkLockStackClosureType>
+inline void stackChunkOopDesc::iterate_lockstack(StackChunkLockStackClosureType* closure) {
+  assert(LockingMode == LM_LIGHTWEIGHT, "");
+  int cnt = lockstack_size();
+  intptr_t* lockstart_addr = start_address();
+  for (int i = 0; i < cnt; i++) {
+    closure->do_oop((OopT*)&lockstart_addr[i]);
+  }
+}
+
 template <class StackChunkFrameClosureType>
 inline void stackChunkOopDesc::iterate_stack(StackChunkFrameClosureType* closure) {
   has_mixed_frames() ? iterate_stack<ChunkFrames::Mixed>(closure)
@@ -196,7 +253,7 @@ inline void stackChunkOopDesc::iterate_stack(StackChunkFrameClosureType* closure
 
 template <ChunkFrames frame_kind, class StackChunkFrameClosureType>
 inline void stackChunkOopDesc::iterate_stack(StackChunkFrameClosureType* closure) {
-  const SmallRegisterMap* map = SmallRegisterMap::instance;
+  const SmallRegisterMap* map = SmallRegisterMap::instance();
   assert(!map->in_cont(), "");
 
   StackChunkFrameStream<frame_kind> f(this);
@@ -208,15 +265,13 @@ inline void stackChunkOopDesc::iterate_stack(StackChunkFrameClosureType* closure
                          RegisterMap::ProcessFrames::skip,
                          RegisterMap::WalkContinuation::include);
     full_map.set_include_argument_oops(false);
+    closure->do_frame(f, map);
 
     f.next(&full_map);
-
-    assert(!f.is_done(), "");
-    assert(f.is_compiled(), "");
+    if (f.is_done()) return;
 
     should_continue = closure->do_frame(f, &full_map);
-    f.next(map);
-    f.handle_deopted(); // the stub caller might be deoptimized (as it's not at a call)
+    f.next(&map);
   }
   assert(!f.is_stub(), "");
 
@@ -252,12 +307,13 @@ inline BitMapView stackChunkOopDesc::bitmap() const {
   return bitmap;
 }
 
-inline BitMap::idx_t stackChunkOopDesc::bit_index_for(intptr_t* p) const {
+inline BitMap::idx_t stackChunkOopDesc::bit_index_for(address p) const {
   return UseCompressedOops ? bit_index_for((narrowOop*)p) : bit_index_for((oop*)p);
 }
 
 template <typename OopT>
 inline BitMap::idx_t stackChunkOopDesc::bit_index_for(OopT* p) const {
+  assert(is_aligned(p, alignof(OopT)), "should be aligned: " PTR_FORMAT, p2i(p));
   assert(p >= (OopT*)start_address(), "Address not in chunk");
   return p - (OopT*)start_address();
 }
@@ -276,7 +332,7 @@ inline MemRegion stackChunkOopDesc::range() {
 }
 
 inline int stackChunkOopDesc::relativize_usp_offset(const frame& fr, const int usp_offset_in_bytes) const {
-  assert(fr.is_compiled_frame() || fr.cb()->is_safepoint_stub(), "");
+  assert(fr.is_compiled_frame() || fr.cb()->is_runtime_stub(), "");
   assert(is_in_chunk(fr.unextended_sp()), "");
 
   intptr_t* base = fr.real_fp(); // equal to the caller's sp
@@ -383,7 +439,7 @@ inline int stackChunkOopDesc::relativize_address(intptr_t* p) const {
   assert(start_address() <= p && p <= base, "start_address: " PTR_FORMAT " p: " PTR_FORMAT " base: " PTR_FORMAT,
          p2i(start_address()), p2i(p), p2i(base));
   assert(0 <= offset && offset <= std::numeric_limits<int>::max(), "offset: " PTR_FORMAT, offset);
-  return offset;
+  return (int)offset;
 }
 
 inline void stackChunkOopDesc::relativize_frame(frame& fr) const {
