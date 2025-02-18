@@ -347,11 +347,12 @@ public final class ScopedValue<T> {
          * method.
          *
          * @param key the {@code ScopedValue} key
-         * @param value the value, can be {@code null}
+         * @param value the value
          * @param <T> the type of the value
          * @return a new {@code Carrier} with the mappings from this carrier plus the new mapping
          */
         public <T> Carrier where(ScopedValue<T> key, T value) {
+            Objects.requireNonNull(value);
             return where(key, value, this);
         }
 
@@ -522,11 +523,12 @@ public final class ScopedValue<T> {
      * }
      *
      * @param key the {@code ScopedValue} key
-     * @param value the value, can be {@code null}
+     * @param value the value
      * @param <T> the type of the value
      * @return a new {@code Carrier} with a single mapping
      */
     public static <T> Carrier where(ScopedValue<T> key, T value) {
+        Objects.requireNonNull(value);
         return Carrier.of(key, value);
     }
 
@@ -612,10 +614,11 @@ public final class ScopedValue<T> {
      * Returns the value of this scoped value if bound in the current thread, otherwise
      * returns {@code other}.
      *
-     * @param other the value to return if not bound, can be {@code null}
+     * @param other the value to return if not bound
      * @return the value of the scoped value if bound, otherwise {@code other}
      */
     public T orElse(T other) {
+        Objects.requireNonNull(other);
         Object obj = findBinding();
         if (obj != Snapshot.NIL) {
             @SuppressWarnings("unchecked")

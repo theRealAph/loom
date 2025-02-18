@@ -141,7 +141,7 @@ class ScopedValueAPI {
      */
     @ParameterizedTest
     @MethodSource("factories")
-    void testIsBound(ThreadFactory factory) throws Exception {
+        void testIsBound(ThreadFactory factory) throws Exception {
         test(factory, () -> {
             ScopedValue<String> name1 = ScopedValue.newInstance();
             ScopedValue<String> name2 = ScopedValue.newInstance();
@@ -175,18 +175,15 @@ class ScopedValueAPI {
     void testOrElse(ThreadFactory factory) throws Exception {
         test(factory, () -> {
             ScopedValue<String> name = ScopedValue.newInstance();
-            assertNull(name.orElse(null));
             assertEquals("default", name.orElse("default"));
 
             // where
             ScopedValue.where(name, "duke").run(() -> {
-                assertEquals("duke", name.orElse(null));
                 assertEquals("duke", name.orElse("default"));
             });
 
             // callWhere
             ScopedValue.where(name, "duke").call(() -> {
-                assertEquals("duke", name.orElse(null));
                 assertEquals("duke", name.orElse("default"));
                 return null;
             });
@@ -294,92 +291,6 @@ class ScopedValueAPI {
     }
 
     /**
-     * Test rebinding from null vaue to another value.
-     */
-    @ParameterizedTest
-    @MethodSource("factories")
-    void testRebindingFromNull(ThreadFactory factory) throws Exception {
-        test(factory, () -> {
-            ScopedValue<String> name = ScopedValue.newInstance();
-
-            // where
-            ScopedValue.where(name, null).run(() -> {
-                assertTrue(name.isBound());
-                assertNull(name.get());
-
-                ScopedValue.where(name, "duchess").run(() -> {
-                    assertTrue(name.isBound());
-                    assertTrue("duchess".equals(name.get()));
-                });
-
-                assertTrue(name.isBound());
-                assertNull(name.get());
-            });
-            assertFalse(name.isBound());
-
-            // callWhere
-            ScopedValue.where(name, null).call(() -> {
-                assertTrue(name.isBound());
-                assertNull(name.get());
-
-                ScopedValue.where(name, "duchess").call(() -> {
-                    assertTrue(name.isBound());
-                    assertTrue("duchess".equals(name.get()));
-                    return null;
-                });
-
-                assertTrue(name.isBound());
-                assertNull(name.get());
-                return null;
-            });
-            assertFalse(name.isBound());
-        });
-    }
-
-    /**
-     * Test rebinding to null value.
-     */
-    @ParameterizedTest
-    @MethodSource("factories")
-    void testRebindingToNull(ThreadFactory factory) throws Exception {
-        test(factory, () -> {
-            ScopedValue<String> name = ScopedValue.newInstance();
-
-            // where
-            ScopedValue.where(name, "duke").run(() -> {
-                assertTrue(name.isBound());
-                assertEquals("duke", name.get());
-
-                ScopedValue.where(name, null).run(() -> {
-                    assertTrue(name.isBound());
-                    assertNull(name.get());
-                });
-
-                assertTrue(name.isBound());
-                assertEquals("duke", name.get());
-            });
-            assertFalse(name.isBound());
-
-            // callWhere
-            ScopedValue.where(name, "duke").call(() -> {
-                assertTrue(name.isBound());
-                assertEquals("duke", name.get());
-
-                ScopedValue.where(name, null).call(() -> {
-                    assertTrue(name.isBound());
-                    assertNull(name.get());
-                    return null;
-                });
-
-                assertTrue(name.isBound());
-                assertEquals("duke", name.get());
-                return null;
-            });
-            assertFalse(name.isBound());
-        });
-    }
-
-    /**
      * Test Carrier.get.
      */
     @ParameterizedTest
@@ -416,13 +327,16 @@ class ScopedValueAPI {
         assertThrows(NullPointerException.class, () -> ScopedValue.where(null, "duke").call(() -> ""));
         assertThrows(NullPointerException.class, () -> ScopedValue.where(name, "duke").call(null));
 
+        assertThrows(NullPointerException.class, () -> ScopedValue.where(name, null));
         assertThrows(NullPointerException.class, () -> name.orElseThrow(null));
 
         var carrier = ScopedValue.where(name, "duke");
         assertThrows(NullPointerException.class, () -> carrier.where(null, "duke"));
+        assertThrows(NullPointerException.class, () -> carrier.where(name, null));
         assertThrows(NullPointerException.class, () -> carrier.get((ScopedValue<?>)null));
         assertThrows(NullPointerException.class, () -> carrier.run(null));
         assertThrows(NullPointerException.class, () -> carrier.call(null));
+        assertThrows(NullPointerException.class, () -> carrier.run(() -> name.orElse(null)));
     }
 
     @FunctionalInterface
